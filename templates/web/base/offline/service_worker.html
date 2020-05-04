@@ -53,14 +53,20 @@ addEventListener('fetch',  fetchEvent => {
       catch {
         fetchEvent.waitUntil(async function() {
           var text = await request.text();
-          let formData = new URLSearchParams(text);
-          formData.set('save', 2);
-          formData.set('saved_at', Math.floor(+new Date() / 1000));
-          formData = formData.toString();
+          var headers = request.headers;
+          let formData = {};
+          formData.contentType = headers.get('Content-Type');
+          let re = /.*boundary=(.*)/;
+          let bound = formData.contentType.match(re);
+
+          // TODO: need to replace this rather than add it
+          let saved = '--' + bound[1] + "\r\nContent-Disposition: form-data; name=\"save\"\r\n\r\n2\r\n";
+          saved += '--' + bound[1] + "\r\nContent-Disposition: form-data; name=\"saved_at\"\r\n\r\n" + Math.floor(+new Date() / 1000) + "\r\n";
+          formData.text = saved + text;
 
           var data = await idbKeyval.get('offlineData') || { cachedReports: {}, forms: [] };
           var forms = data.forms;
-          if (!forms.length || formData != forms[forms.length - 1][1]) {
+          if (!forms.length || text != forms[forms.length - 1][1]) {
             forms.push([request.url, formData]);
           }
           return idbKeyval.set('offlineData', data);
