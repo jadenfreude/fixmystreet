@@ -661,6 +661,14 @@ $.extend(fixmystreet.set_up, {
 
   dropzone: function($context) {
 
+    // we don't want to create this if we're offline (e.g using the inspector
+    // panel to add a photo) as the server side bit does not work.
+    if (!navigator.onLine) {
+      console.log('offline, no fancy photos for you!');
+      return;
+    }
+    console.log('online, you get fancy photos!');
+
     // Pass a jQuery element, eg $('.foobar'), into this function
     // to limit all the selectors to that element. Handy if you want
     // to only bind/detect Dropzones in a particular part of the page,

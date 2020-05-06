@@ -56,12 +56,12 @@ addEventListener('fetch',  fetchEvent => {
           var headers = request.headers;
           let formData = {};
           formData.contentType = headers.get('Content-Type');
-          let re = /.*boundary=(.*)/;
-          let bound = formData.contentType.match(re);
+          let boundary_re = /.*boundary=(.*)/;
+          let bound = formData.contentType.match(boundary_re);
 
-          // TODO: need to replace this rather than add it
-          let saved = '--' + bound[1] + "\r\nContent-Disposition: form-data; name=\"save\"\r\n\r\n2\r\n";
-          saved += '--' + bound[1] + "\r\nContent-Disposition: form-data; name=\"saved_at\"\r\n\r\n" + Math.floor(+new Date() / 1000) + "\r\n";
+          let saved = '--' + bound[1] + "\r\nContent-Disposition: form-data; name=\"saved_at\"\r\n\r\n" + Math.floor(+new Date() / 1000) + "\r\n";
+          let save_re = /(name="save"[\s\S]*)(Save changes)/;
+          text = text.replace(save_re, '$12');
           formData.text = saved + text;
 
           var data = await idbKeyval.get('offlineData') || { cachedReports: {}, forms: [] };
