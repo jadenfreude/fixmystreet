@@ -6,7 +6,12 @@ use warnings;
 use utf8;
 use DateTime::Format::W3CDTF;
 use DateTime::Format::Flexible;
+use Integrations::Echo;
+use LWP::Simple qw(get);
+use JSON::MaybeXS;
+use Sort::Key::Natural qw(natkeysort_inplace);
 use Try::Tiny;
+use URI::Escape qw(uri_escape_utf8);
 use FixMyStreet::DateRange;
 
 sub council_area_id { return 2482; }
@@ -364,5 +369,133 @@ sub munge_load_and_group_problems {
     }
 }
 
-1;
+sub munge_around_category_where {
+    my ($self, $where) = @_;
+    $where->{extra} = [ undef, { -not_like => '%Waste%' } ];
+}
 
+sub munge_reports_category_list {
+    my ($self, $categories) = @_;
+    @$categories = grep { grep { $_ ne 'Waste' } @{$_->groups} } @$categories;
+}
+
+sub munge_report_new_contacts {
+    my ($self, $categories) = @_;
+
+    return if $self->{c}->action =~ /^hercules/;
+
+    @$categories = grep { grep { $_ ne 'Waste' } @{$_->groups} } @$categories;
+    $self->SUPER::munge_report_new_contacts($categories);
+}
+
+sub bin_addresses_for_postcode {
+    my $self = shift;
+    my $pc = shift;
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->FindPoints($pc);
+
+    my $points = $result->{PointInfo};
+    $points = [ $points ] unless ref $points eq 'ARRAY';
+    my $data = [ map { {
+        value => $_->{SharedRef}{Value}{anyType},
+        label => FixMyStreet::Template::title($_->{Description}),
+    } } @$points ];
+    natkeysort_inplace { $_->{label} } @$data;
+    return $data;
+}
+
+sub look_up_property {
+    my $self = shift;
+    my $uprn = shift;
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->GetPointAddress($uprn);
+    return $result;
+
+}
+
+my %irregulars = ( 1 => 'st', 2 => 'nd', 3 => 'rd', 11 => 'th', 12 => 'th', 13 => 'th');
+sub ordinal {
+    my $n = shift;
+	$irregulars{$n % 100} || $irregulars{$n % 10} || 'th';
+}
+
+sub construct_bin_date {
+    my $str = shift;
+    return unless $str;
+    my $offset = ($str->{OffsetMinutes} || 0) * 60;
+    my $zone = DateTime::TimeZone->offset_as_string($offset);
+    $zone =~ s/(\d\d)$/:$1/;
+    (my $date = $str->{DateTime}) =~ s/Z/$zone/;
+    $date = DateTime::Format::W3CDTF->parse_datetime($date);
+    return $date;
+}
+
+sub bin_services_for_address {
+    my $self = shift;
+    my $uprn = shift;
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->GetServiceUnitsForObject($uprn);
+    return [] unless $result;
+
+    my @out;
+    my $today = DateTime->today->set_time_zone(FixMyStreet->local_time_zone)->strftime("%F");
+    foreach (@{$result->{ServiceUnit}}) {
+        next unless $_->{ServiceTasks};
+
+        my $servicetask = $_->{ServiceTasks}{ServiceTask};
+        my $schedules = $servicetask->{ServiceTaskSchedules}{ServiceTaskSchedule};
+        $schedules = [ $schedules ] unless ref $schedules eq 'ARRAY';
+
+        my ($min_next, $max_last, $next_changed, $next_ordinal, $last_ordinal);
+        foreach my $schedule (@$schedules) {
+            my $end_date = construct_bin_date($schedule->{EndDate})->strftime("%F");
+            next if $end_date lt $today;
+
+            my $next = $schedule->{NextInstance}; # CurrentScheduledData->DateTime, Ref->Value->anyType, OriginalScheduledDate->DateTime
+            my $d = construct_bin_date($next->{CurrentScheduledDate});
+            if ($d && (!$min_next || $d < $min_next)) {
+                $min_next = $d;
+                $next_changed = $next->{CurrentScheduledDate}{DateTime} ne $next->{OriginalScheduledDate}{DateTime};
+            }
+
+            my $last = $schedule->{LastInstance}; # ditto
+            $d = construct_bin_date($last->{CurrentScheduledDate});
+            $max_last = $d if $d && (!$max_last || $d > $max_last);
+            # XXX Have to call getTask for each last instance to get its CompletedDate?
+
+            #$schedule->{ScheduleDescription};
+            #$schedule->{ScheduleId};
+            #$schedule->{Id};
+            #$schedule->{Allocation}; # Type RoundName RoundId RoundGroupName/Id RoundLegId RoundLegName
+        }
+
+        next unless $min_next or $max_last;
+        $next_ordinal = ordinal($min_next->day) if $min_next;
+        $last_ordinal = ordinal($max_last->day) if $max_last;
+
+        my $row = {
+            id => $_->{Id},
+            service_id => $_->{ServiceId},
+            service_name => $_->{ServiceName},
+            #$servicetask->{TaskTypeName} TaskTypeId Id
+            schedule => $servicetask->{ScheduleDescription},
+            last => $max_last,
+            last_ordinal => $last_ordinal,
+            next => $min_next,
+            next_ordinal => $next_ordinal,
+            next_changed => $next_changed,
+        };
+
+        push @out, $row;
+    }
+
+    return \@out;
+}
+
+1;
