@@ -3,11 +3,24 @@ fixmystreet.maps.tile_base = [ [ '', 'a-', 'b-', 'c-' ], '//{S}tilma.mysociety.o
 fixmystreet.maps.config = (function(original) {
     return function(){
         original();
-        fixmystreet.map_type = OpenLayers.Layer.BingUK;
+        fixmystreet.map_type = OpenLayers.Layer.BingAerial;
     };
 })(fixmystreet.maps.config);
 
-OpenLayers.Layer.BingUK = OpenLayers.Class(OpenLayers.Layer.Bing, {
+(function() {
+    $(function(){
+        $('#map_layer_toggle').toggle(function(){
+            $(this).text('Roads');
+            fixmystreet.map.setBaseLayer(fixmystreet.map.layers[1]);
+        }, function(){
+            $(this).text('Aerial');
+            fixmystreet.map.setBaseLayer(fixmystreet.map.layers[0]);
+        });
+    });
+
+})();
+
+OpenLayers.Layer.BingBase = OpenLayers.Class(OpenLayers.Layer.Bing, {
     uk_bounds: [
         new OpenLayers.Bounds(-6.6, 49.8, 1.102680, 51),
         new OpenLayers.Bounds(-5.4, 51, 2.28, 54.94),
@@ -52,6 +65,10 @@ OpenLayers.Layer.BingUK = OpenLayers.Class(OpenLayers.Layer.Bing, {
         this._updateAttribution(copyrights, logo);
     },
 
+    CLASS_NAME: "OpenLayers.Layer.BingBase"
+});
+
+OpenLayers.Layer.BingUK = OpenLayers.Class(OpenLayers.Layer.BingBase, {
     get_urls: function(bounds, z) {
         var urls;
         var in_uk = this.in_uk(bounds.getCenterLonLat());
@@ -77,3 +94,23 @@ OpenLayers.Layer.BingUK = OpenLayers.Class(OpenLayers.Layer.Bing, {
 
     CLASS_NAME: "OpenLayers.Layer.BingUK"
 });
+
+OpenLayers.Layer.BingAerial = OpenLayers.Class(OpenLayers.Layer.BingBase, {
+    get_urls: function(bounds, z) {
+        var type = '&key=' + fixmystreet.key;
+        var urls = [
+            "//ecn.t0.tiles.virtualearth.net/tiles/a${id}.png?g=6570" + type,
+            "//ecn.t1.tiles.virtualearth.net/tiles/a${id}.png?g=6570" + type,
+            "//ecn.t2.tiles.virtualearth.net/tiles/a${id}.png?g=6570" + type,
+            "//ecn.t3.tiles.virtualearth.net/tiles/a${id}.png?g=6570" + type
+        ];
+        return urls;
+    },
+
+    CLASS_NAME: "OpenLayers.Layer.BingAerial"
+});
+
+fixmystreet.layer_options = [
+  { map_type: OpenLayers.Layer.BingUK },
+  { map_type: OpenLayers.Layer.BingAerial }
+];
