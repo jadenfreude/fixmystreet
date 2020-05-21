@@ -61,7 +61,8 @@ fixmystreet.offlineBanner = (function() {
             }
 
             function postForm(url, data) {
-              return $.ajax({ url: url, contentType: data.contentType, data: data.text, type: 'POST' }).done(nextForm);
+              fixmystreet.postformdata = data;
+              return $.ajax({ url: url, contentType: data.contentType, data: String.fromCharCode.apply(null, new Uint16Array(data.text)), type: 'POST' }).done(nextForm);
             }
 
             $(document).on('click', '#oFN', function(e) {
