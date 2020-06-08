@@ -16,7 +16,7 @@
 
 [% FOR unit IN service_data %]
 
-<a href="#" class="hercules-service-name-link"><h3 class="govuk-heading-m">[% unit.service_name %]</h3></a>
+<a data-toggle-visibility="#panel-[% unit.service_id %]" class="hercules-service-name-link"><h3 class="govuk-heading-m">[% unit.service_name %]</h3></a>
 
 <dl class="govuk-summary-list">
   <div class="govuk-summary-list__row">
@@ -46,7 +46,7 @@
   </div>
 </dl>
 
-<div class="hercules-services-launch-panel">
+<div class="hercules-services-launch-panel hidden-js" id="panel-[% unit.service_id %]">
     [% INCLUDE hercules/services.html %]
 </div>
 
