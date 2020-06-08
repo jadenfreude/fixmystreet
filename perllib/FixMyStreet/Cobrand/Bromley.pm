@@ -492,11 +492,40 @@ sub bin_services_for_address {
             544 => 'Food Waste',
         );
 
+        $self->{c}->stash->{containers} = {
+            1 => 'Green Box (Plastic)',
+            2 => 'Wheeled Bin (Plastic)',
+            12 => 'Black Box (Paper)',
+            13 => 'Wheeled Bin (Paper)',
+            9 => 'Kitchen Caddy',
+            10 => 'Outside Food Waste Container',
+            45 => 'Wheeled Bin (Food)',
+        };
+
+        my %containers = (
+            535 => [ 1 ],
+            536 => [ 2 ],
+            537 => [ 12 ],
+            541 => [ 13 ],
+            542 => [ 9, 10 ],
+            544 => [ 45 ],
+        );
+        my %quantity_max = (
+            535 => 6,
+            536 => 4,
+            537 => 6,
+            541 => 4,
+            542 => 6,
+            544 => 4,
+        );
+
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
             service_name => $service_name_override{$_->{ServiceId}} || $_->{ServiceName},
             request_allowed => $request_allowed{$_->{ServiceId}},
+            request_containers => $containers{$_->{ServiceId}},
+            request_max => $quantity_max{$_->{ServiceId}},
             #$servicetask->{TaskTypeName} TaskTypeId Id
             schedule => $servicetask->{ScheduleDescription},
             last => $max_last,

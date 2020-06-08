@@ -13,20 +13,22 @@ $staff_user->user_body_permissions->create({ body => $body, permission_type => '
 $staff_user->user_body_permissions->create({ body => $body, permission_type => 'report_mark_private' });
 
 sub create_contact {
-    my ($params, $extra) = @_;
+    my ($params, @extra) = @_;
     my $contact = $mech->create_contact_ok(body => $body, %$params);
     $contact->set_extra_metadata(group => ['Waste']);
     $contact->set_extra_fields(
         { code => 'uprn', required => 1, automated => 'hidden_field' },
-        { code => 'service_id', required => 1, automated => 'hidden_field' },
-        $extra || (),
+        { code => 'service_id', required => 0, automated => 'hidden_field' },
+        @extra,
     );
     $contact->update;
 }
 
 create_contact({ category => 'Report missed collection', email => 'missed' });
 create_contact({ category => 'Request new container', email => 'request' },
-    { code => 'Quantity', required => 1, automated => 'hidden_field' });
+    { code => 'Quantity', required => 1, automated => 'hidden_field' },
+    { code => 'Container_Type', required => 1, automated => 'hidden_field' },
+);
 create_contact({ category => 'General enquiry', email => 'general' },
     { code => 'Notes', description => 'Notes', required => 1, datatype => 'text' });
 
@@ -90,19 +92,19 @@ FixMyStreet::override_config {
         $mech->get_ok('/hercules/uprn/1000000002/request');
         $mech->submit_form_ok({ form_number => 2 });
         $mech->content_contains('Please specify what you need');
-        $mech->submit_form_ok({ with_fields => { 'service-103' => 1 } });
+        $mech->submit_form_ok({ with_fields => { 'container-1' => 1 } });
         $mech->content_contains('Quantity field is required');
-        $mech->submit_form_ok({ with_fields => { 'service-103' => 1, 'quantity-103' => 2 } });
+        $mech->submit_form_ok({ with_fields => { 'container-1' => 1, 'quantity-1' => 2 } });
         $mech->submit_form_ok({ with_fields => { name => "Test McTest", email => $user->email } });
-        $mech->content_contains('Mixed recycling collection');
+        $mech->content_contains('Green Box');
         $mech->content_contains('Test McTest');
         $mech->content_contains($user->email);
         $mech->submit_form_ok({ with_fields => { process => 'summary' } });
         $mech->content_contains('Your request has been sent');
         my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
         is $report->get_extra_field_value('uprn'), 1000000002;
-        is $report->get_extra_field_value('service_id'), 103;
         is $report->get_extra_field_value('Quantity'), 2;
+        is $report->get_extra_field_value('Container_Type'), 1;
     };
     subtest 'General enquiry, bad data' => sub {
         $mech->get_ok('/hercules/uprn/1000000002/enquiry');

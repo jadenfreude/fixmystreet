@@ -177,8 +177,8 @@ sub GetServiceUnitsForObject {
             } },
         }, {
             Id => 1003,
-            ServiceId => 103,
-            ServiceName => 'Mixed recycling collection',
+            ServiceId => 535,
+            ServiceName => 'Domestic Container Mix Collection',
             ServiceTasks => { ServiceTask => {
                 ScheduleDescription => 'every other Wednesday',
                 ServiceTaskSchedules => { ServiceTaskSchedule => {

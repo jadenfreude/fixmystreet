@@ -8,7 +8,7 @@ sub validate {
     my $self = shift;
     my $any = 0;
     foreach ($self->all_fields) {
-        $any = 1 if $_->name =~ /^service-/ && $_->value;
+        $any = 1 if $_->name =~ /^container-/ && $_->value;
     }
     $self->add_form_error('Please specify what you need')
         unless $any;

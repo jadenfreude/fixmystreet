@@ -5,6 +5,7 @@ use namespace::autoclean;
 BEGIN { extends 'Catalyst::Controller' }
 
 use utf8;
+use Lingua::EN::Inflect qw( NUMWORDS );
 use FixMyStreet::App::Form::Hercules::UPRN;
 use FixMyStreet::App::Form::Hercules::AboutYou;
 use FixMyStreet::App::Form::Hercules::Request;
@@ -89,40 +90,40 @@ sub construct_bin_request_form {
 
     my $field_list = [];
 
-    my %quantity_options = (
-        type => 'Select',
-        label => 'Quantity',
-        tags => {
-            hint => 'You can request a maximum of six containers',
-            initial_hidden => 1,
-        },
-        options => [
-            { value => "", label => '-' },
-            map { { value => $_, label => $_ } } (1..6),
-        ],
-    );
-
     foreach (@{$c->stash->{service_data}}) {
         next unless $_->{next};
-        my $id = $_->{service_id};
         my $name = $_->{service_name};
-        push @$field_list, "service-$id" => {
-            type => 'Checkbox',
-            apply => [
-                {
-                    when => { "quantity-$id" => sub { $_[0] > 0 } },
-                    check => qr/^1$/,
-                    message => 'Please tick the box',
+        my $containers = $_->{request_containers};
+        my $max = $_->{request_max};
+        foreach my $id (@$containers) {
+            push @$field_list, "container-$id" => {
+                type => 'Checkbox',
+                apply => [
+                    {
+                        when => { "quantity-$id" => sub { $_[0] > 0 } },
+                        check => qr/^1$/,
+                        message => 'Please tick the box',
+                    },
+                ],
+                label => $name,
+                option_label => $c->stash->{containers}->{$id},
+                tags => { toggle => "form-quantity-$id-row" },
+            };
+            $name = ''; # Only on first container
+            push @$field_list, "quantity-$id" => {
+                type => 'Select',
+                label => 'Quantity',
+                tags => {
+                    hint => "You can request a maximum of " . NUMWORDS($max) . " containers",
+                    initial_hidden => 1,
                 },
-            ],
-            label => $name,
-            option_label => $name,
-            tags => { toggle => "form-quantity-$id-row" },
-        };
-        push @$field_list, "quantity-$id" => {
-            %quantity_options,
-            required_when => { "service-$id" => 1 },
-        };
+                options => [
+                    { value => "", label => '-' },
+                    map { { value => $_, label => $_ } } (1..$max),
+                ],
+                required_when => { "container-$id" => 1 },
+            };
+        }
     }
 
     push @$field_list, category => { type => 'Hidden', default => 'Request new container' };
@@ -170,14 +171,14 @@ sub request : Chained('uprn') : Args(0) {
 sub process_request_data : Private {
     my ($self, $c) = @_;
     my $data = $c->stash->{data};
-    my @services = grep { /^service-/ && $data->{$_} } keys %$data;
+    my @services = grep { /^container-/ && $data->{$_} } keys %$data;
     foreach (@services) {
-        my ($id) = /service-(.*)/;
-        my $service = $c->stash->{services}{$id}{service_name};
+        my ($id) = /container-(.*)/;
+        my $container = $c->stash->{containers}{$id};
         my $quantity = $data->{"quantity-$id"};
-        $data->{title} = "Request new $service container";
+        $data->{title} = "Request new $container";
         $data->{detail} = "Quantity: $quantity";
-        $c->set_param('service_id', $id);
+        $c->set_param('Container_Type', $id);
         $c->set_param('Quantity', $quantity);
         $c->forward('add_report') or return;
         push @{$c->stash->{report_ids}}, $c->stash->{report}->id;
