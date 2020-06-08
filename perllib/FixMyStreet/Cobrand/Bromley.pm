@@ -479,10 +479,13 @@ sub bin_services_for_address {
         $next_ordinal = ordinal($min_next->day) if $min_next;
         $last_ordinal = ordinal($max_last->day) if $max_last;
 
+        my %request_allowed = map { $_ => 1 } (535, 536, 537, 541, 542, 544);
+
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
             service_name => $_->{ServiceName},
+            request_allowed => $request_allowed{$_->{ServiceId}},
             #$servicetask->{TaskTypeName} TaskTypeId Id
             schedule => $servicetask->{ScheduleDescription},
             last => $max_last,
