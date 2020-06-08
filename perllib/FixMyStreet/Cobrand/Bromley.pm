@@ -480,11 +480,22 @@ sub bin_services_for_address {
         $last_ordinal = ordinal($max_last->day) if $max_last;
 
         my %request_allowed = map { $_ => 1 } (535, 536, 537, 541, 542, 544);
+        my %service_name_override = (
+            531 => 'Non-Recyclable Waste',
+            532 => 'Non-Recyclable Waste',
+            533 => 'Non-Recyclable Waste',
+            535 => 'Mixed Recycling (Cans, Plastics & Glass)',
+            536 => 'Mixed Recycling (Cans, Plastics & Glass)',
+            537 => 'Paper & Cardboard',
+            541 => 'Paper & Cardboard',
+            542 => 'Food Waste',
+            544 => 'Food Waste',
+        );
 
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
-            service_name => $_->{ServiceName},
+            service_name => $service_name_override{$_->{ServiceId}} || $_->{ServiceName},
             request_allowed => $request_allowed{$_->{ServiceId}},
             #$servicetask->{TaskTypeName} TaskTypeId Id
             schedule => $servicetask->{ScheduleDescription},
