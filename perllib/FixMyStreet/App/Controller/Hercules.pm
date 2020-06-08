@@ -358,7 +358,7 @@ sub form : Private {
 
     my $saved_data = $c->get_param('saved_data');
     $saved_data = FixMyStreet::App::Form::Field::JSON->inflate_json($saved_data) || {};
-    map { $saved_data->{$_} = 1 } grep { /^service-/ && $c->req->params->{$_} } keys %{$c->req->params};
+    map { $saved_data->{$_} = 1 } grep { /^(service|container)-/ && $c->req->params->{$_} } keys %{$c->req->params};
 
     my $goto = $c->get_param('goto') || '';
     my $process = $c->get_param('process') || '';
