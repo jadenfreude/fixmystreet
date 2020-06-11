@@ -79,6 +79,10 @@
   }
 }
 
+.hercules-service-name.govuk-heading-m {
+  margin-top: 1.5em;
+}
+
 .hercules-service-link,
 input[type="submit"].hercules-service-link {
   font-family: $body-font;
@@ -111,11 +115,6 @@ input[type="submit"].hercules-service-link {
     right: 1em;
     top: 0;
     font-weight: bold;
-  }
-  .hercules & {
-    .govuk-heading-m {
-      color: inherit;
-    }
   }
 }
 
