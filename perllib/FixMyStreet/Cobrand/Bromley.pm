@@ -397,6 +397,7 @@ sub bin_addresses_for_postcode {
     my $result = $echo->FindPoints($pc);
 
     my $points = $result->{PointInfo};
+    return [] unless $points;
     $points = [ $points ] unless ref $points eq 'ARRAY';
     my $data = [ map { {
         value => $_->{SharedRef}{Value}{anyType},
@@ -420,7 +421,7 @@ sub look_up_property {
 my %irregulars = ( 1 => 'st', 2 => 'nd', 3 => 'rd', 11 => 'th', 12 => 'th', 13 => 'th');
 sub ordinal {
     my $n = shift;
-	$irregulars{$n % 100} || $irregulars{$n % 10} || 'th';
+    $irregulars{$n % 100} || $irregulars{$n % 10} || 'th';
 }
 
 sub construct_bin_date {

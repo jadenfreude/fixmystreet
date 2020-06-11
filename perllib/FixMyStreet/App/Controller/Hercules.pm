@@ -12,6 +12,13 @@ use FixMyStreet::App::Form::Hercules::Request;
 use FixMyStreet::App::Form::Hercules::Report;
 use FixMyStreet::App::Form::Field::JSON;
 
+sub auto : Private {
+    my ( $self, $c ) = @_;
+    my $cobrand_check = $c->cobrand->feature('hercules');
+    $c->detach( '/page_error_404_not_found' ) if !$cobrand_check;
+    return 1;
+}
+
 sub index : Path : Args(0) {
     my ( $self, $c ) = @_;
 

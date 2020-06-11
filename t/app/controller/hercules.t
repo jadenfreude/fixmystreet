@@ -34,7 +34,7 @@ create_contact({ category => 'General enquiry', email => 'general' },
 
 FixMyStreet::override_config {
     ALLOWED_COBRANDS => ['bromley', 'fixmystreet'],
-    COBRAND_FEATURES => { echo => { bromley => { sample_data => 1 } } },
+    COBRAND_FEATURES => { echo => { bromley => { sample_data => 1 } }, hercules => { bromley => 1 } },
 }, sub {
     $mech->host('bromley.fixmystreet.com');
     subtest 'Missing address lookup' => sub {
@@ -139,7 +139,7 @@ package main;
 
 FixMyStreet::override_config {
     ALLOWED_COBRANDS => 'bromley',
-    COBRAND_FEATURES => { echo => { bromley => { url => 'http://example.org' } } },
+    COBRAND_FEATURES => { echo => { bromley => { url => 'http://example.org' } }, hercules => { bromley => 1 } },
 }, sub {
     subtest 'Address lookup, mocking SOAP call' => sub {
         my $integ = Test::MockModule->new('SOAP::Lite');

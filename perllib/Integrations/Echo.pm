@@ -67,8 +67,6 @@ sub call {
     return $res;
 }
 
-#print $echo->GetTasks( 27345708, 7433);
-
 sub GetTasks {
     my $self = shift;
     my $ref1 = shift;

@@ -51,8 +51,12 @@
 </div>
 
 [% END %]
+[% IF NOT service_data.size %]
+    <p>This property has no collections.</p>
+[% END %]
     </div>
 
+    [% IF service_data.size %]
     <div class="govuk-grid-column-one-third">
       <div class="aside">
         <div class="aside-download">
@@ -70,6 +74,7 @@
         </div>
       </div>
     </div>
+    [% END %]
   </div>
 </div>
 [% INCLUDE footer.html %]
