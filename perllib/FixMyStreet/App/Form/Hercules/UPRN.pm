@@ -23,6 +23,7 @@ has_field postcode => (
         push @$data, { value => 'missing', label => 'I can’t find my address' };
         $self->value($data);
     },
+    tags => { autofocus => 1 },
 );
 
 has_field go => (

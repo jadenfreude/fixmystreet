@@ -395,6 +395,7 @@ sub bin_addresses_for_postcode {
     my $echo = $self->feature('echo');
     $echo = Integrations::Echo->new(%$echo);
     my $result = $echo->FindPoints($pc);
+    return [] unless $result;
 
     my $points = $result->{PointInfo};
     return [] unless $points;
@@ -414,8 +415,11 @@ sub look_up_property {
     my $echo = $self->feature('echo');
     $echo = Integrations::Echo->new(%$echo);
     my $result = $echo->GetPointAddress($uprn);
-    return $result;
-
+    return {
+        address => $result->{Description},
+        latitude => $result->{Coordinates}{GeoPoint}{Latitude},
+        longitude => $result->{Coordinates}{GeoPoint}{Longitude},
+    };
 }
 
 my %irregulars = ( 1 => 'st', 2 => 'nd', 3 => 'rd', 11 => 'th', 12 => 'th', 13 => 'th');

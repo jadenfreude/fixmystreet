@@ -81,8 +81,8 @@ sub uprn : Chained('/') : PathPart('hercules/uprn') : CaptureArgs(1) {
     $c->detach( '/page_error_404_not_found', [] ) unless $property;
 
     $c->stash->{uprn} = $uprn;
-    $c->stash->{latitude} = $property->{Coordinates}{GeoPoint}{Latitude};
-    $c->stash->{longitude} = $property->{Coordinates}{GeoPoint}{Longitude};
+    $c->stash->{latitude} = $property->{latitude};
+    $c->stash->{longitude} = $property->{longitude};
 
     $c->stash->{service_data} = $c->cobrand->call_hook(bin_services_for_address => $uprn) || [];
     $c->stash->{services} = { map { $_->{service_id} => $_ } @{$c->stash->{service_data}} };

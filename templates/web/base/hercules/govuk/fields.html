@@ -201,6 +201,7 @@
   [% END %]
     <input class="govuk-input[% IF error %] govuk-input--error[% END %]" id="[% field.id %]" name="[% field.html_name %]" type="text"
          value="[% field.fif %]"
+    [%~ IF field.get_tag('autofocus') %] autofocus[% END ~%]
     [%~ IF field.get_tag('hint') OR error %]
       aria-describedby="[% IF field.get_tag('hint') %][% field.id %]-hint [% END %][% IF error %][% id %]-error[% END %]"
     [%~ END %]>
