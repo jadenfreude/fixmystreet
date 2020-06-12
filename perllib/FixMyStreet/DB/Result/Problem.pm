@@ -193,6 +193,27 @@ __PACKAGE__->might_have(
     cascade_copy => 0, cascade_delete => 1 },
 );
 
+# Add a possible join for the Contact object associated with
+# this report (based on bodies_str and category). If the report
+# was sent to multiple bodies, only returns the first.
+__PACKAGE__->belongs_to(
+  contact => "FixMyStreet::DB::Result::Contact",
+  sub {
+    my $args = shift;
+    return {
+        "$args->{foreign_alias}.category" => { -ident => "$args->{self_alias}.category" },
+        -and => [
+            \[ "CAST($args->{foreign_alias}.body_id AS text) = (regexp_split_to_array($args->{self_alias}.bodies_str, ','))[1]" ],
+        ]
+    };
+  },
+  {
+    join_type => "LEFT",
+    on_delete => "NO ACTION",
+    on_update => "NO ACTION",
+  },
+);
+
 __PACKAGE__->load_components("+FixMyStreet::DB::RABXColumn");
 __PACKAGE__->rabx_column('extra');
 __PACKAGE__->rabx_column('geocode');
@@ -407,28 +428,9 @@ sub confirm {
 
 sub category_display {
     my $self = shift;
-    my $contact = $self->category_row;
+    my $contact = $self->contact;
     return $self->category unless $contact; # Fallback; shouldn't happen, but some tests
     return $contact->category_display;
-}
-
-=head2 category_row
-
-Returns the corresponding Contact object for this problem's category and body.
-If the report was sent to multiple bodies, only returns the first.
-
-=cut
-
-sub category_row {
-    my $self = shift;
-    my $schema = $self->result_source->schema;
-    my $body_id = $self->bodies_str_ids->[0];
-    return unless $body_id && $body_id =~ /^[0-9]+$/;
-    my $contact = $schema->resultset("Contact")->find({
-        body_id => $body_id,
-        category => $self->category,
-    });
-    return $contact;
 }
 
 sub bodies_str_ids {
@@ -523,6 +525,31 @@ sub tokenised_url {
     );
 
     return "/M/". $token->token;
+}
+
+has view_token => (
+    is => 'ro',
+    lazy => 1,
+    default => sub {
+        my $self = shift;
+        my $token = FixMyStreet::DB->resultset('Token')->create({
+            scope => 'alert_to_reporter',
+            data => { id => $self->id }
+        });
+    },
+);
+
+=head2 view_url
+
+Return a url for this problem report that will always show it
+(even if e.g. a private report) but does not log the user in.
+
+=cut
+
+sub view_url {
+    my $self = shift;
+    return $self->url unless $self->non_public;
+    return "/R/" . $self->view_token->token;
 }
 
 =head2 is_hidden
@@ -775,7 +802,7 @@ sub defect_types {
 #     Note:   this only makes sense when called on a problem that has been sent!
 sub can_display_external_id {
     my $self = shift;
-    if ($self->external_id && $self->to_body_named('Oxfordshire|Lincolnshire|Isle of Wight')) {
+    if ($self->external_id && $self->to_body_named('Oxfordshire|Lincolnshire|Isle of Wight|East Sussex')) {
         return 1;
     }
     return 0;
@@ -1045,7 +1072,7 @@ sub pin_data {
 };
 
 sub static_map {
-    my ($self) = @_;
+    my ($self, %params) = @_;
 
     return unless $IM;
 
@@ -1053,7 +1080,11 @@ sub static_map {
         unless $FixMyStreet::Map::map_class->isa("FixMyStreet::Map::OSM");
 
     my $map_data = $FixMyStreet::Map::map_class->generate_map_data(
-        { cobrand => $self->get_cobrand_logged },
+        {
+            cobrand => $self->get_cobrand_logged,
+            distance => 1, # prevents the call to Gaze which isn't necessary
+            $params{zoom} ? ( zoom => $params{zoom} ) : (),
+        },
         latitude  => $self->latitude,
         longitude => $self->longitude,
         pins      => $self->used_map
@@ -1110,7 +1141,7 @@ sub static_map {
     $image->Extent( geometry => '512x384', gravity => 'NorthWest');
     $image->Extent( geometry => '512x320', gravity => 'SouthWest');
 
-    $image->Scale( geometry => "310x200>" );
+    $image->Scale( geometry => "310x200>" ) unless $params{full_size};
 
     my @blobs = $image->ImageToBlob(magick => 'jpeg');
     undef $image;

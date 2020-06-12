@@ -31,7 +31,7 @@ my $sample_file = path(__FILE__)->parent->parent->child("app/controller/sample.j
 ok $sample_file->exists, "sample file $sample_file exists";
 
 sub send_reports_for_zurich {
-    FixMyStreet::Script::Reports::send('zurich');
+    FixMyStreet::Script::Reports::send();
 }
 sub reset_report_state {
     my ($report, $created) = @_;
@@ -50,6 +50,7 @@ sub reset_report_state {
 my $UPLOAD_DIR = File::Temp->newdir();
 FixMyStreet::override_config {
     STAGING_FLAGS => { send_reports => 1 },
+    BASE_URL => 'https://www.zurich',
     ALLOWED_COBRANDS => 'zurich',
     MAPIT_URL => 'http://mapit.zurich/',
     MAPIT_TYPES => [ 'O08' ],
@@ -117,6 +118,15 @@ $mech->content_contains('Überprüfung ausstehend')
 my $json = $mech->get_ok_json( '/report/ajax/' . $report->id );
 is $json->{report}->{title}, "Überprüfung ausstehend", "correct title";
 is $json->{report}->{state}, "submitted", "correct state";
+
+$report->state('fixed - council');
+$report->set_extra_metadata(public_response => 'Freundliche Grüsse');
+$report->update;
+$json = $mech->get_ok_json( '/report/ajax/' . $report->id );
+is $json->{report}->{state}, "closed", "correct state";
+is $json->{updates}->{details}, "Freundliche Grüsse", "correct public response";
+
+$report->update({ state => 'submitted' });
 
 subtest "Banners are displayed correctly" => sub {
     for my $test (

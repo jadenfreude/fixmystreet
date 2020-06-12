@@ -83,6 +83,7 @@ subtest 'Check updates not sent for defects' => sub {
 };
 
 $report->update({ user => $user });
+$comment->update({ extra => undef });
 subtest 'check updates sent for non defects' => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => [ { northamptonshire => '.' } ],
@@ -96,6 +97,22 @@ subtest 'check updates sent for non defects' => sub {
     is $comment->send_fail_count, 1, "comment sending attempted";
 };
 
+subtest 'check closing reports disallowed' => sub {
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => 'northamptonshire',
+        #MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $report->update({ state => 'confirmed' });
+        $mech->get_ok('/report/' . $report->id);
+        $mech->content_lacks('This problem has been fixed');
+        $mech->log_out_ok;
+        $mech->log_in_ok($counciluser->email);
+        $mech->get_ok('/report/' . $report->id);
+        $mech->content_contains('fixed - council');
+    };
+};
+
+
 my $cobrand = FixMyStreet::Cobrand::Northamptonshire->new;
 
 subtest 'check updates disallowed correctly' => sub {
@@ -104,6 +121,32 @@ subtest 'check updates disallowed correctly' => sub {
     is $cobrand->updates_disallowed($report), 1;
     $report->update({ state => 'confirmed', user => $counciluser });
     is $cobrand->updates_disallowed($report), 1;
+};
+
+subtest 'check further investigation state' => sub {
+    $comment->problem_state('investigating');
+    $comment->update();
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { northamptonshire => '.' } ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->get_ok('/report/' . $comment->problem_id);
+    };
+
+    $mech->content_lacks('Under further investigation');
+
+    $comment->set_extra_metadata('external_status_code' => 'further');
+    $comment->update;
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ { northamptonshire => '.' } ],
+        MAPIT_URL => 'http://mapit.uk/',
+    }, sub {
+        $mech->get_ok('/report/' . $comment->problem_id);
+    };
+
+    $mech->content_contains('Under further investigation');
 };
 
 subtest 'check pin colour / reference shown' => sub {

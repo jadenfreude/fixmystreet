@@ -77,6 +77,13 @@ sub open311_pre_send {
 # Make sure fetched report description isn't shown.
 sub filter_report_description { "" }
 
+around 'open311_config' => sub {
+    my ($orig, $self, $row, $h, $params) = @_;
+
+    $params->{upload_files} = 1;
+    $self->$orig($row, $h, $params);
+};
+
 sub open311_munge_update_params {
     my ($self, $params, $comment, $body) = @_;
 
@@ -108,8 +115,8 @@ sub munge_reports_category_list {
     return @$categories;
 }
 
-sub munge_report_new_category_list {
-    my ($self, $options, $contacts, $extras) = @_;
+sub munge_report_new_contacts {
+    my ($self, $contacts) = @_;
 
     my $user = $self->{c}->user;
     my %bodies = map { $_->body->name => $_->body } @$contacts;
@@ -117,14 +124,10 @@ sub munge_report_new_category_list {
 
     if ( $user && ( $user->is_superuser || $user->belongs_to_body( $b->id ) ) ) {
         @$contacts = grep { !$_->send_method || $_->send_method ne 'Triage' } @$contacts;
-        my $seen = { map { $_->category => 1 } @$contacts };
-        @$options = grep { my $c = ($_->{category} || $_->category); $c =~ 'Pick a category' || $seen->{ $c } } @$options;
         return;
     }
 
     @$contacts = grep { $_->send_method && $_->send_method eq 'Triage' } @$contacts;
-    my $seen = { map { $_->category => 1 } @$contacts };
-    @$options = grep { my $c = ($_->{category} || $_->category); $c =~ 'Pick a category' || $seen->{ $c } } @$options;
 }
 
 sub munge_around_category_where {
@@ -134,19 +137,18 @@ sub munge_around_category_where {
     my $b = $self->{c}->model('DB::Body')->for_areas( $self->council_area_id )->first;
     if ( $user && ( $user->is_superuser || $user->belongs_to_body( $b->id ) ) ) {
         $where->{send_method} = [ { '!=' => 'Triage' }, undef ];
-        return $where;
+        return;
     }
 
     $where->{'send_method'} = 'Triage';
-    return $where;
 }
 
 sub munge_load_and_group_problems {
     my ($self, $where, $filter) = @_;
 
-    return unless $where->{category};
+    return unless $where->{'me.category'};
 
-    $where->{category} = $self->expand_triage_cat_list($where->{category});
+    $where->{'me.category'} = $self->_expand_triage_cat_list($where->{'me.category'});
 }
 
 sub munge_around_filter_category_list {
@@ -155,17 +157,21 @@ sub munge_around_filter_category_list {
     my $c = $self->{c};
     return unless $c->stash->{filter_category};
 
-    my $cat_names = $self->expand_triage_cat_list([ keys %{$c->stash->{filter_category}} ]);
+    my $cat_names = $self->_expand_triage_cat_list([ keys %{$c->stash->{filter_category}} ]);
     $c->stash->{filter_category} = { map { $_ => 1 } @$cat_names };
+}
+
+sub _expand_triage_cat_list {
+    my ($self, $categories) = @_;
+    my $b = $self->{c}->model('DB::Body')->for_areas( $self->council_area_id )->first;
+    return $self->expand_triage_cat_list($categories, $b);
 }
 
 # this assumes that each Triage category has the same name as a group
 # and uses this to generate a list of categories that a triage category
 # could be triaged to
 sub expand_triage_cat_list {
-    my ($self, $categories) = @_;
-
-    my $b = $self->{c}->model('DB::Body')->for_areas( $self->council_area_id )->first;
+    my ($self, $categories, $b) = @_;
 
     my $all_cats = $self->{c}->model('DB::Contact')->not_deleted->search(
         {
@@ -176,10 +182,7 @@ sub expand_triage_cat_list {
 
     my %group_to_category;
     while ( my $cat = $all_cats->next ) {
-        next unless $cat->get_extra_metadata('group');
-        my $groups = $cat->get_extra_metadata('group');
-        $groups = ref $groups eq 'ARRAY' ? $groups : [ $groups ];
-        for my $group ( @$groups ) {
+        for my $group ( @{$cat->groups} ) {
             $group_to_category{$group} //= [];
             push @{ $group_to_category{$group} }, $cat->category;
         }
@@ -194,7 +197,7 @@ sub expand_triage_cat_list {
 
     my @cat_names;
     while ( my $cat = $cats->next ) {
-        if ( $cat->send_method eq 'Triage' ) {
+        if ( $cat->send_method && $cat->send_method eq 'Triage' ) {
             # include the category itself
             push @cat_names, $cat->category;
             push @cat_names, @{ $group_to_category{$cat->category} } if $group_to_category{$cat->category};

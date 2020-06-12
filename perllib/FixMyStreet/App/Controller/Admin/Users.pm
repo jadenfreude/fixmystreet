@@ -373,6 +373,11 @@ sub edit : Chained('user') : PathPart('') : Args(0) {
             my @live_contact_ids = map { $_->id } @live_contacts;
             my @new_contact_ids = grep { $c->get_param("contacts[$_]") } @live_contact_ids;
             $user->set_extra_metadata('categories', \@new_contact_ids);
+            if ($c->get_param('assigned_categories_only')) {
+                $user->set_extra_metadata(assigned_categories_only => 1);
+            } else {
+                $user->unset_extra_metadata('assigned_categories_only');
+            }
         } else {
             $user->unset_extra_metadata('categories');
         }
@@ -396,7 +401,7 @@ sub edit : Chained('user') : PathPart('') : Args(0) {
             id => $_->id,
             category => $_->category,
             active => $active_contacts{$_->id},
-            group => $_->get_extra_metadata('group') // '',
+            group => $_->groups,
         } } @live_contacts;
         $c->stash->{contacts} = \@all_contacts;
         $c->forward('/report/stash_category_groups', [ \@all_contacts, 1 ]) if $c->cobrand->enable_category_groups;

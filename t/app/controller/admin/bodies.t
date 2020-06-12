@@ -1,3 +1,13 @@
+package FixMyStreet::Cobrand::AnonAllowedByCategory;
+use parent 'FixMyStreet::Cobrand::UKCouncils';
+sub council_url { 'anonbycategory' }
+sub council_name { 'Aberdeen City Council' }
+sub council_area { 'Aberdeen' }
+sub council_area_id { 2650 }
+sub anonymous_account { { email => 'anoncategory@example.org', name => 'Anonymous Category' } }
+
+package main;
+
 use FixMyStreet::TestMech;
 
 my $mech = FixMyStreet::TestMech->new;
@@ -210,6 +220,7 @@ subtest 'check open311 configuring' => sub {
 
 subtest 'check open311 devolved editing' => sub {
     $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->content_contains("name=\"category\"\n    size=\"30\" value=\"test category\"\n    readonly>", 'Cannot edit Open311 category name');
     $mech->submit_form_ok( { with_fields => {
         send_method => 'Email',
         email => 'testing@example.org',
@@ -217,6 +228,7 @@ subtest 'check open311 devolved editing' => sub {
     } } );
     $mech->content_contains('Values updated');
     $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->content_contains("name=\"category\"\n    size=\"30\" value=\"test category\"\n    required>", 'Can edit as now devolved');
     $mech->submit_form_ok( { with_fields => {
         send_method => '',
         email => 'open311-code',
@@ -250,8 +262,75 @@ subtest 'disable form message editing' => sub {
     }], 'right message added';
 };
 
+subtest 'open311 protection editing' => sub {
+    $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->submit_form_ok( { with_fields => {
+        open311_protect => 1,
+        note => 'Protected from Open311 changes',
+    } } );
+    $mech->content_contains('Values updated');
+    my $contact = $body->contacts->find({ category => 'test category' });
+    is $contact->get_extra_metadata('open311_protect'), 1, 'Open311 protect flag set';
+};
+
+subtest 'test assigned_users_only setting' => sub {
+    $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->submit_form_ok( { with_fields => {
+        assigned_users_only => 1,
+    } } );
+    $mech->content_contains('Values updated');
+    my $contact = $body->contacts->find({ category => 'test category' });
+    is $contact->get_extra_metadata('assigned_users_only'), 1;
+};
+
+subtest 'updates disabling' => sub {
+    $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->submit_form_ok( { with_fields => {
+        updates_disallowed => 1,
+        note => 'Disabling updates',
+    } } );
+    $mech->content_contains('Values updated');
+    my $contact = $body->contacts->find({ category => 'test category' });
+    is $contact->get_extra_metadata('updates_disallowed'), 1, 'Updates disallowed flag set';
+};
+
+subtest 'reopen disabling' => sub {
+    $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->submit_form_ok( { with_fields => {
+        reopening_disallowed => 1,
+        note => 'Disabling reopening',
+    } } );
+    $mech->content_contains('Values updated');
+    my $contact = $body->contacts->find({ category => 'test category' });
+    is $contact->get_extra_metadata('reopening_disallowed'), 1, 'Reopening disallowed flag set';
+};
+
+subtest 'allow anonymous reporting' => sub {
+    $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->content_lacks('Allow anonymous reports');
+};
 
 }; # END of override wrap
+FixMyStreet::override_config {
+    MAPIT_URL => 'http://mapit.uk/',
+    MAPIT_TYPES => [ 'UTA' ],
+    BASE_URL => 'http://www.example.org',
+    ALLOWED_COBRANDS => [ "fixmystreet", "anonallowedbycategory" ],
+}, sub {
+
+subtest 'allow anonymous reporting' => sub {
+    $mech->get_ok('/admin/body/' . $body->id . '/test%20category');
+    $mech->submit_form_ok( { with_fields => {
+        anonymous_allowed => 1,
+        note => 'Anonymous Allowed',
+    } } );
+    $mech->content_contains('Values updated');
+    my $contact = $body->contacts->find({ category => 'test category' });
+    is $contact->get_extra_metadata('anonymous_allowed'), 1, 'Anonymous reports allowed flag set';
+};
+
+};
+
 
 FixMyStreet::override_config {
     MAPIT_URL => 'http://mapit.uk/',

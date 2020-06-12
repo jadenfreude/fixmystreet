@@ -22,6 +22,8 @@ my $user2 = $mech->create_user_ok('commenter@example.com', name => 'Commenter');
 
 my $body = $mech->create_body_ok(2504, 'Westminster City Council');
 
+my $contact = $mech->create_contact_ok( body_id => $body->id, category => 'Other', email => 'other' );
+
 my $dt = DateTime->new(
     year   => 2011,
     month  => 04,
@@ -1893,6 +1895,18 @@ for my $test (
     };
 }
 
+$mech->log_in_ok( $report->user->email );
+
+my %standard_fields = (
+    name => $report->user->name,
+    update => 'update text',
+    photo1 => '',
+    photo2 => '',
+    photo3 => '',
+    may_show_name => 1,
+    add_alert => 1,
+);
+
 for my $test (
     {
         desc => 'update confirmed without marking as fixed leaves state unchanged',
@@ -2094,18 +2108,6 @@ for my $test (
     },
 ) {
     subtest $test->{desc} => sub {
-        $mech->log_in_ok( $report->user->email );
-
-        my %standard_fields = (
-            name => $report->user->name,
-            update => 'update text',
-            photo1 => '',
-            photo2 => '',
-            photo3 => '',
-            may_show_name => 1,
-            add_alert => 1,
-        );
-
         my %expected_fields = (
             %standard_fields,
             %{ $test->{expected_form_fields} },
@@ -2143,6 +2145,17 @@ for my $test (
     };
 }
 
+subtest 'check disabling of reopening' => sub {
+    $report->state('fixed - council');
+    $report->update;
+    $mech->get_ok("/report/$report_id");
+    $mech->content_contains('This problem has not been fixed');
+    $contact->set_extra_metadata( reopening_disallowed => 1 );
+    $contact->update;
+    $mech->get_ok("/report/$report_id");
+    $mech->content_lacks('This problem has not been fixed');
+};
+
 subtest 'check have to be logged in for creator fixed questionnaire' => sub {
     $mech->log_out_ok();
 
@@ -2176,6 +2189,13 @@ FixMyStreet::override_config {
         $mech->get( "/report/$report_id" );
         $mech->content_lacks("Provide an update");
     };
+};
+
+subtest 'check disabling of updates per category' => sub {
+    $contact->set_extra_metadata( updates_disallowed => 1 );
+    $contact->update;
+    $mech->get_ok("/report/$report_id");
+    $mech->content_lacks('Provide an update');
 };
 
 done_testing();

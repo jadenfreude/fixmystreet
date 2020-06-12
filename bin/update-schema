@@ -212,6 +212,8 @@ else {
 # (assuming schema change files are never half-applied, which should be the case)
 sub get_db_version {
     return 'EMPTY' if ! table_exists('problem');
+    return '0072' if constraint_contains('contacts_state_check', 'staff');
+    return '0071' if table_exists('manifest_theme');
     return '0070' if column_like('alert_type', "ref='new_problems'", 'head_title', '{{SITE_NAME}}');
     return '0069' if constraint_contains('admin_log_object_type_check', 'template');
     return '0068' if column_exists('users', 'oidc_ids');
@@ -317,7 +319,7 @@ sub constraint_exists {
 # Returns true if a check constraint contains a certain string
 sub constraint_contains {
     my ( $constraint, $check ) = @_;
-    my ($consrc) = $db->dbh->selectrow_array('select consrc from pg_constraint where conname = ?', {}, $constraint);
+    my ($consrc) = $db->dbh->selectrow_array('select pg_get_expr(conbin, conrelid) from pg_constraint where conname = ?', {}, $constraint);
     return unless $consrc;
     return $consrc =~ /$check/;
 }

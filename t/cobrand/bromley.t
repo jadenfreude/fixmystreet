@@ -26,6 +26,10 @@ $mech->create_contact_ok(
     email => 'tfl@example.org',
 );
 
+my $waste = $mech->create_contact_ok(body => $body, category => 'Report missed collection', email => 'missed');
+$waste->set_extra_metadata(group => ['Waste']);
+$waste->update;
+
 my @reports = $mech->create_problems_for_body( 1, $body->id, 'Test', {
     latitude => 51.402096,
     longitude => 0.015784,
@@ -177,7 +181,7 @@ for my $test (
     };
 }
 
-subtest 'check display of TfL reports' => sub {
+subtest 'check display of TfL and waste reports' => sub {
     $mech->create_problems_for_body( 1, $tfl->id, 'TfL Test', {
         latitude => 51.402096,
         longitude => 0.015784,
@@ -193,6 +197,7 @@ subtest 'check display of TfL reports' => sub {
     };
     $mech->content_like(qr{<a title="TfL Test[^>]*www.example.org[^>]*><img[^>]*grey});
     $mech->content_like(qr{<a title="Test Test[^>]*href="/[^>]*><img[^>]*yellow});
+    $mech->content_lacks('Report missed collection');
 };
 
 subtest 'check geolocation overrides' => sub {
@@ -233,7 +238,7 @@ subtest 'check heatmap page' => sub {
     FixMyStreet::override_config {
         ALLOWED_COBRANDS => 'bromley',
         MAPIT_URL => 'http://mapit.uk/',
-        COBRAND_FEATURES => { heatmap => { bromley => 1 } },
+        COBRAND_FEATURES => { category_groups => { bromley => 1 }, heatmap => { bromley => 1 } },
     }, sub {
         $mech->log_in_ok($user->email);
         $mech->get_ok('/dashboard/heatmap?end_date=2018-12-31');

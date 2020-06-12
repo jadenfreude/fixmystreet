@@ -1,6 +1,7 @@
 package Open311::PopulateServiceList;
 
 use Moo;
+use File::Basename;
 use Open311;
 
 has bodies => ( is => 'ro' );
@@ -128,10 +129,23 @@ sub process_service {
     }
 }
 
+sub _action_params {
+    my ( $self, $action ) = @_;
+
+    return {
+        editor => basename($0),
+        whenedited => \'current_timestamp',
+        note => "$action automatically by script",
+    };
+}
+
 sub _handle_existing_contact {
     my ( $self, $contact ) = @_;
 
     my $service_name = $self->_normalize_service_name;
+    my $protected = $contact->get_extra_metadata("open311_protect");
+
+    return if $self->_current_body_cobrand && $self->_current_body_cobrand->call_hook(open311_skip_existing_contact => $contact);
 
     print $self->_current_body->id . " already has a contact for service code " . $self->_current_service->{service_code} . "\n" if $self->verbose >= 2;
 
@@ -139,12 +153,10 @@ sub _handle_existing_contact {
         eval {
             $contact->update(
                 {
-                    category => $service_name,
+                    $protected ? () : (category => $service_name),
                     email => $self->_current_service->{service_code},
                     state => 'confirmed',
-                    editor => $0,
-                    whenedited => \'current_timestamp',
-                    note => 'automatically undeleted by script',
+                    %{ $self->_action_params("undeleted") },
                 }
             );
         };
@@ -169,7 +181,7 @@ sub _handle_existing_contact {
         $contact->update;
     }
 
-    $self->_set_contact_group($contact);
+    $self->_set_contact_group($contact) unless $protected;
     $self->_set_contact_non_public($contact);
 
     push @{ $self->found_contacts }, $self->_current_service->{service_code};
@@ -188,9 +200,7 @@ sub _create_contact {
                 body_id => $self->_current_body->id,
                 category => $service_name,
                 state => 'confirmed',
-                editor => $0,
-                whenedited => \'current_timestamp',
-                note => 'created automatically by script',
+                %{ $self->_action_params("created") },
             }
         );
     };
@@ -292,18 +302,10 @@ sub _set_contact_group {
     if ($self->_groups_different($old_group, $new_group)) {
         if (@$new_group) {
             $contact->set_extra_metadata(group => @$new_group == 1 ? $new_group->[0] : $new_group);
-            $contact->update({
-                editor => $0,
-                whenedited => \'current_timestamp',
-                note => 'group updated automatically by script',
-            });
+            $contact->update( $self->_action_params("group updated") );
         } else {
             $contact->unset_extra_metadata('group');
-            $contact->update({
-                editor => $0,
-                whenedited => \'current_timestamp',
-                note => 'group removed automatically by script',
-            });
+            $contact->update( $self->_action_params("group removed") );
         }
     }
 }
@@ -317,9 +319,7 @@ sub _set_contact_non_public {
     my %keywords = map { $_ => 1 } split /,/, ( $self->_current_service->{keywords} || '' );
     $contact->update({
         non_public => 1,
-        editor => $0,
-        whenedited => \'current_timestamp',
-        note => 'marked private automatically by script',
+        %{ $self->_action_params("marked private") },
     }) if $keywords{private};
 }
 
@@ -352,10 +352,10 @@ sub _delete_contacts_not_in_service_list {
     );
 
     if ($self->_current_body->can_be_devolved) {
-        # If the body has can_be_devolved switched on, it's most likely a
-        # combination of Open311/email, so ignore any email addresses.
+        # If the body has can_be_devolved switched on, ignore any
+        # contact with its own send method
         $found_contacts = $found_contacts->search(
-            { email => { -not_like => '%@%' } }
+            { send_method => [ "", undef ] },
         );
     }
 
@@ -364,9 +364,7 @@ sub _delete_contacts_not_in_service_list {
     $found_contacts->update(
         {
             state => 'deleted',
-            editor  => $0,
-            whenedited => \'current_timestamp',
-            note => 'automatically marked as deleted by script'
+            %{ $self->_action_params("marked as deleted") },
         }
     );
 }
@@ -374,7 +372,11 @@ sub _delete_contacts_not_in_service_list {
 sub _delete_contacts_not_in_service_list_cobrand_overrides {
     my ( $self, $found_contacts ) = @_;
 
-    return $found_contacts;
+    if ($self->_current_body_cobrand && $self->_current_body_cobrand->can('open311_filter_contacts_for_deletion')) {
+        return $self->_current_body_cobrand->open311_filter_contacts_for_deletion($found_contacts);
+    } else {
+        return $found_contacts;
+    }
 }
 
 1;

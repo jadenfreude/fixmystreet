@@ -523,13 +523,29 @@ sub allow_update_reporting { return 0; }
 =item updates_disallowed
 
 Returns a boolean indicating whether updates on a particular report are allowed
-or not. Default behaviour is disallowed if "closed_updates" metadata is set.
+or not. Default behaviour is disallowed if "closed_updates" metadata is set, or
+if the report's category has its "updates_disallowed" flag set.
 
 =cut
 
 sub updates_disallowed {
     my ($self, $problem) = @_;
     return 1 if $problem->get_extra_metadata('closed_updates');
+    return 1 if $problem->contact && $problem->contact->get_extra_metadata('updates_disallowed');
+    return 0;
+}
+
+=item reopening_disallowed
+
+Returns a boolean indicating whether reopening of a particular report is
+allowed or not. Default behaviour is allowed unless the report's category
+has its reopening_disallowed flag set.
+
+=cut
+
+sub reopening_disallowed {
+    my ($self, $problem) = @_;
+    return 1 if $problem->contact && $problem->contact->get_extra_metadata('reopening_disallowed');
     return 0;
 }
 
@@ -685,6 +701,7 @@ sub admin_pages {
         $pages->{flagged} = [ _('Flagged'), 7 ];
         $pages->{states} = [ _('States'), 8 ];
         $pages->{config} = [ _('Configuration'), 9];
+        $pages->{manifesttheme} = [ _('Manifest Theme'), 11];
         $pages->{user_import} = [ undef, undef ];
     };
     # And some that need special permissions
@@ -940,9 +957,10 @@ Get stats to display on the council reports page
 sub get_report_stats { return 0; }
 
 sub get_body_sender {
-    my ( $self, $body, $category ) = @_;
+    my ( $self, $body, $problem ) = @_;
 
     # look up via category
+    my $category = $problem->category;
     my $contact = $body->contacts->search( { category => $category } )->first;
     if ( $body->can_be_devolved && $contact->send_method ) {
         return { method => $contact->send_method, config => $contact, contact => $contact };
@@ -1106,7 +1124,22 @@ pressed in the front end, rather than whenever a username is not provided.
 
 =cut
 
-sub allow_anonymous_reports { 0; }
+sub allow_anonymous_reports {
+    my ($self, $category_name) = @_;
+
+    $category_name ||= $self->{c}->stash->{category};
+    if ( $category_name && $self->can('body') and $self->body ) {
+        my $category_rs = FixMyStreet::DB->resultset("Contact")->search({
+            body_id => $self->body->id,
+            category => $category_name
+        });
+        if ( my $category = $category_rs->first ) {
+            return 'button' if $category->get_extra_metadata('anonymous_allowed');
+        }
+    }
+
+    return 0;
+}
 
 =item anonymous_account
 

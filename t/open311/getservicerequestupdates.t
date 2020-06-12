@@ -683,29 +683,11 @@ subtest 'using start and end date' => sub {
     my $local_requests_xml = $requests_xml;
     my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $local_requests_xml } );
 
-    my $start_dt = DateTime->now();
+    my $start_dt = DateTime->now(formatter => DateTime::Format::W3CDTF->new);
+    my $end_dt = $start_dt->clone;
     $start_dt->subtract( days => 1 );
-    my $end_dt = DateTime->now();
 
     my $update = Open311::GetServiceRequestUpdates->new( 
-        system_user => $user,
-        start_date => $start_dt,
-        current_open311 => $o,
-    );
-
-    my $res = $update->process_body;
-    is $res, 0, 'returns 0 if start but no end date';
-
-    $update = Open311::GetServiceRequestUpdates->new( 
-        system_user => $user,
-        end_date => $end_dt,
-        current_open311 => $o,
-    );
-
-    $res = $update->process_body;
-    is $res, 0, 'returns 0 if end but no start date';
-
-    $update = Open311::GetServiceRequestUpdates->new( 
         system_user => $user,
         start_date => $start_dt,
         end_date => $end_dt,
@@ -950,8 +932,6 @@ subtest 'check that external_status_code triggers auto-responses' => sub {
     $problem->discard_changes;
     is $problem->comments->count, 1, 'one comment after fetching updates';
 
-    my $comment = $problem->comments->first;
-
     is $problem->comments->first->text, "Thank you for your report. We will provide an update within 24 hours.", "correct external status code on first comment";
 };
 
@@ -1009,6 +989,117 @@ foreach my $test ( {
         $problem->comments->delete;
     };
 }
+
+my $response_template_in_progress = $bodies{2482}->response_templates->create({
+    title => "Acknowledgement 1",
+    text => "Thank you for your report. We will provide an update within 48 hours.",
+    auto_response => 1,
+    state => "in progress"
+});
+
+for my $test (
+    {
+        external_code => '090',
+        description => 'check numeric external status code in response template override state',
+    },
+    {
+        external_code => 'futher',
+        description => 'check alpha external status code in response template override state',
+    },
+) {
+    subtest $test->{description} => sub {
+        my $requests_xml = qq{<?xml version="1.0" encoding="utf-8"?>
+        <service_requests_updates>
+        <request_update>
+        <update_id>638344</update_id>
+        <service_request_id>@{[ $problem->external_id ]}</service_request_id>
+        <status>in_progress</status>
+        <description></description>
+        <updated_datetime>UPDATED_DATETIME</updated_datetime>
+        <external_status_code></external_status_code>
+        </request_update>
+        <request_update>
+        <update_id>638345</update_id>
+        <service_request_id>@{[ $problem->external_id ]}</service_request_id>
+        <status>in_progress</status>
+        <description></description>
+        <updated_datetime>UPDATED_DATETIME2</updated_datetime>
+        <external_status_code>@{[ $test->{external_code} ]}</external_status_code>
+        </request_update>
+        </service_requests_updates>
+        };
+
+        my $response_template = $bodies{2482}->response_templates->create({
+            # the default ordering uses the title of the report so
+            # make sure this comes second
+            title => "Acknowledgement 2",
+            text => "Thank you for your report. We will provide an update within 24 hours.",
+            auto_response => 1,
+            external_status_code => $test->{external_code}
+        });
+
+        $problem->comments->delete;
+
+        my $dt2 = $dt->clone->add( minutes => 1 );
+        $requests_xml =~ s/UPDATED_DATETIME/$dt/;
+        $requests_xml =~ s/UPDATED_DATETIME2/$dt2/;
+
+        my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $requests_xml } );
+
+        my $update = Open311::GetServiceRequestUpdates->new(
+            system_user => $user,
+            current_open311 => $o,
+            current_body => $bodies{2482},
+        );
+
+        $update->process_body;
+
+        $problem->discard_changes;
+        is $problem->comments->count, 2, 'two comment after fetching updates';
+
+        my @comments = $problem->comments->search(undef, { order_by => 'confirmed' });
+
+        is $comments[0]->text, "Thank you for your report. We will provide an update within 48 hours.", "correct external status code on first comment";
+        is $comments[1]->text, "Thank you for your report. We will provide an update within 24 hours.", "correct external status code on second comment";
+        $problem->comments->delete;
+        $response_template->delete;
+    };
+}
+
+subtest 'check that first comment always updates state'  => sub {
+    my $requests_xml = qq{<?xml version="1.0" encoding="utf-8"?>
+    <service_requests_updates>
+    <request_update>
+    <update_id>638344</update_id>
+    <service_request_id>@{[ $problem->external_id ]}</service_request_id>
+    <status>in_progress</status>
+    <description>This is a note</description>
+    <updated_datetime>UPDATED_DATETIME</updated_datetime>
+    </request_update>
+    </service_requests_updates>
+    };
+
+    $problem->state( 'confirmed' );
+    $problem->lastupdate( $dt->clone->subtract( hours => 1 ) );
+    $problem->update;
+
+    $requests_xml =~ s/UPDATED_DATETIME/@{[$dt->clone->subtract( minutes => 62 )]}/;
+
+    my $o = Open311->new( jurisdiction => 'mysociety', endpoint => 'http://example.com', test_mode => 1, test_get_returns => { 'servicerequestupdates.xml' => $requests_xml } );
+
+    my $update = Open311::GetServiceRequestUpdates->new(
+        system_user => $user,
+        current_open311 => $o,
+        current_body => $bodies{2482},
+    );
+
+    $update->process_body;
+
+    $problem->discard_changes;
+    is $problem->comments->count, 1, 'one comment after fetching updates';
+    is $problem->state, 'in progress', 'correct problem status';
+    $problem->comments->delete;
+};
 
 foreach my $test ( {
         desc => 'normally alerts are not suppressed',

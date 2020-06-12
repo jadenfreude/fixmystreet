@@ -118,18 +118,19 @@ sub state_groups_inspect {
 sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
-    my $extra = $row->get_extra_fields;
-    push @$extra, { name => 'external_id', value => $row->id };
-    push @$extra, { name => 'northing', value => $h->{northing} };
-    push @$extra, { name => 'easting', value => $h->{easting} };
-
-    if ($h->{closest_address}) {
-        push @$extra, { name => 'closest_address', value => "$h->{closest_address}" }
-    }
-    $row->set_extra_fields( @$extra );
-
     $params->{multi_photos} = 1;
     $params->{extended_description} = 'oxfordshire';
+}
+
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
+
+    return [
+        { name => 'external_id', value => $row->id },
+        { name => 'northing', value => $h->{northing} },
+        { name => 'easting', value => $h->{easting} },
+        $h->{closest_address} ? { name => 'closest_address', value => "$h->{closest_address}" } : (),
+    ];
 }
 
 sub open311_config_updates {
@@ -137,12 +138,39 @@ sub open311_config_updates {
     $params->{use_customer_reference} = 1;
 }
 
+sub open311_pre_send {
+    my ($self, $row, $open311) = @_;
+
+    $self->{ox_original_detail} = $row->detail;
+
+    if (my $fid = $row->get_extra_field_value('feature_id')) {
+        my $text = $row->detail . "\n\nAsset Id: $fid\n";
+        $row->detail($text);
+    }
+
+    if (my $usrn = $row->get_extra_field_value('usrn')) {
+        my $text = $row->detail . "\n\nUSRN: $usrn\n";
+        $row->detail($text);
+    }
+}
+
+sub open311_post_send {
+    my ($self, $row, $h, $contact) = @_;
+
+    $row->detail($self->{ox_original_detail});
+}
+
 sub should_skip_sending_update {
     my ($self, $update ) = @_;
 
     # Oxfordshire stores the external id of the problem as a customer reference
-    # in metadata
-    return 1 if !$update->problem->get_extra_metadata('customer_reference');
+    # in metadata, it arrives in a fetched update (but give up if it never does,
+    # or the update is for an old pre-ref report)
+    my $customer_ref = $update->problem->get_extra_metadata('customer_reference');
+    my $diff = time() - $update->confirmed->epoch;
+    return 1 if !$customer_ref && $diff > 60*60*24;
+    return 'WAIT' if !$customer_ref;
+    return 0;
 }
 
 sub on_map_default_status { return 'open'; }
@@ -194,6 +222,29 @@ sub available_permissions {
     $perms->{Bodies}->{defect_type_edit} = "Add/edit defect types";
 
     return $perms;
+}
+
+sub dashboard_export_problems_add_columns {
+    my $self = shift;
+    my $c = $self->{c};
+
+    push @{$c->stash->{csv}->{headers}}, "HIAMS/Exor Ref";
+    push @{$c->stash->{csv}->{columns}}, "external_ref";
+
+    $c->stash->{csv}->{extra_data} = sub {
+        my $report = shift;
+        # Try and get a HIAMS reference first of all
+        my $ref = $report->get_extra_metadata('customer_reference');
+        unless ($ref) {
+            # No HIAMS ref which means it's either an older Exor report
+            # or a HIAMS report which hasn't had its reference set yet.
+            # We detect the latter case by the id and external_id being the same.
+            $ref = $report->external_id if $report->id ne ( $report->external_id || '' );
+        }
+        return {
+            external_ref => ( $ref || '' ),
+        };
+    };
 }
 
 1;

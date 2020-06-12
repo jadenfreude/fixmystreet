@@ -90,14 +90,6 @@ sub send_questionnaires { 0 }
 
 sub default_map_zoom { 3 }
 
-sub category_extra_hidden {
-    my ($self, $meta) = @_;
-    my $code = $meta->{code};
-    # These two are used in the non-Open311 'Street light fault' category.
-    return 1 if $code eq 'unitid' || $code eq 'asset_details';
-    return $self->SUPER::category_extra_hidden($meta);
-}
-
 sub available_permissions {
     my $self = shift;
 
@@ -161,7 +153,7 @@ sub categories_restriction {
     # send_method set to 'Email::BathNES' (to use a custom template) which must
     # be show on the cobrand.
     return $rs->search( { -or => [
-        'me.send_method' => undef, # Open311 categories
+        'me.send_method' => undef, # Open311 categories, or Highways England
         'me.send_method' => '', # Open311 categories that have been edited in the admin
         'me.send_method' => 'Email::BathNES', # Street Light Fault
         'me.send_method' => 'Blackhole', # Parks categories
@@ -194,7 +186,7 @@ sub dashboard_export_updates_add_columns {
 
     $c->stash->{csv}->{objects} = $c->stash->{csv}->{objects}->search(undef, {
         '+columns' => ['user.email'],
-        prefetch => 'user',
+        join => 'user',
     });
     my $user_lookup = $self->_dashboard_user_lookup;
 
@@ -237,7 +229,7 @@ sub dashboard_export_problems_add_columns {
 
     $c->stash->{csv}->{objects} = $c->stash->{csv}->{objects}->search(undef, {
         '+columns' => ['user.email', 'user.phone'],
-        prefetch => 'user',
+        join => 'user',
     });
     my $user_lookup = $self->_dashboard_user_lookup;
 

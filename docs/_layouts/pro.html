@@ -13,7 +13,6 @@
     <!--[if lt IE 9]>
     <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
     <![endif]-->
-    {% include google-analytics.html %}
     <script type="text/javascript" src="{{ "/assets/vendor/jquery.min.js" | absolute_url }}"></script>
     <script type="text/javascript" src="{{ "/assets/vendor/jquery-migrate.min.js" | absolute_url }}"></script>
     <script type="text/javascript" src="https://www.fixmystreet.com/pro/wp-content/themes/fixmystreet-pro/assets/javascript/bootstrap.min.js"></script>
@@ -84,7 +83,8 @@
           <nav class="sidebar">
                 <ul>
                   <li><a href="/pro-manual/">What is FixMyStreet Pro?</a></li>
-                  <li><a href="/pro-manual/citizens-experience/">The Citizens Experience</a></li>
+                  <li><a href="/pro-manual/citizens-experience/">The Citizen’s Experience</a></li>
+                  <li><a href="/pro-manual/deep-linking/">Deep linking from your site</a></li>
                   <li><a href="/pro-manual/staff-user-accounts/">Staff User Accounts</a></li>
                   <li><a href="/pro-manual/admin-tasks/">Administrator Tasks</a>
                     <ul>
@@ -95,8 +95,7 @@
                       <li><a href="/pro-manual/admin-tasks/#filtering-sorting-reports">Filtering and sorting reports</a></li>
                       <li><a href="/pro-manual/admin-tasks/#view-single-report">Viewing a single report</a></li>
                       <li><a href="/pro-manual/admin-tasks/#search-report">Searching for a report</a></li>
-                      <li><a href="/pro-manual/admin-tasks/#search-user">Searching for a user</a></li>
-                      <li><a href="/pro-manual/admin-tasks/#editing-users-information">Editing a user’s information</a></li>
+                      <li><a href="/pro-manual/admin-tasks/#search-user">User search/edit</a></li>
                       <li><a href="/pro-manual/admin-tasks/#view-reports-non-staff-user">Viewing reports as a non-staff user</a></li>
                       <li><a href="/pro-manual/admin-tasks/#create-reports-behalf-user">Creating reports on behalf of another user</a></li>
                       <li><a href="/pro-manual/admin-tasks/#deal-undesirable-content">Dealing with undesirable content</a></li>
@@ -110,7 +109,7 @@
                       <li><a href="/pro-manual/admin-tasks/#creating-editing-notices">Creating and editing category notices/questions</a></li>
                       <li><a href="/pro-manual/admin-tasks/#creating-editing-priorities">Creating and editing priorities</a></li>
                       <li><a href="/pro-manual/admin-tasks/#creating-editing-response-templates">Creating and editing response templates</a></li>
-                      <li><a href="/pro-manual/admin-tasks/#view-statistics">Viewing statistics</a></li>
+                      <li><a href="/pro-manual/admin-tasks/#view-statistics">Viewing statistics/heatmap</a></li>
                     </ul>
                   </li>
               </ul>
@@ -138,14 +137,15 @@
         <hr class="mysoc-footer__divider" role="presentation">
               <div class="row">
             <div class="col-sm-4">
-                <a href="https://www.mysociety.org?utm_source=fixmystreet.com/pro&amp;utm_content=footer+logo&amp;utm_medium=link&amp;utm_campaign=mysoc_footer" class="mysoc-footer__org__logo mysoc-footer__org__logo--mysociety">mySociety</a>
+                <a href="https://www.mysociety.org?utm_source=fixmystreet.com%2Fpro&amp;utm_content=footer+logo&amp;utm_medium=link&amp;utm_campaign=mysoc_footer" class="mysoc-footer__org__logo mysoc-footer__org__logo--mysociety">mySociety</a>
             </div>
             <div class="col-sm-6">
                 <div class="mysoc-footer__legal">
                     <p>
-                        mySociety Limited is a project of UK Citizens Online Democracy,
-                        a registered charity in England and Wales. For full details visit
-                        <a href="https://www.mysociety.org?utm_source=fixmystreet.com/pro&amp;utm_content=footer+full+legal+details&amp;utm_medium=link&amp;utm_campaign=mysoc_footer">mysociety.org</a>.
+                        <a href="https://www.societyworks.org?utm_source=fixmystreet.com%2Fpro&amp;utm_content=footer+full+legal+details&amp;utm_medium=link&amp;utm_campaign=mysoc_footer">SocietyWorks</a>
+                        is a limited company (05798215). It is a trading subsidiary of
+                        <a href="https://www.mysociety.org?utm_source=fixmystreet.com%2Fpro&amp;utm_content=footer+full+legal+details&amp;utm_medium=link&amp;utm_campaign=mysoc_footer">mySociety</a>,
+                        a registered charity in England and Wales (1076346).
                     </p>
                 </div>
             </div>

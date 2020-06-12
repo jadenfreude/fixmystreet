@@ -45,6 +45,7 @@ h1, h2 {
     }
     #postcodeForm {
         background-color: #fff;
+        padding-bottom: 0;
         div input#sub {
             background-color: $link-color;
         }
@@ -52,17 +53,6 @@ h1, h2 {
     label,
     .form-hint {
         color: $primary_b;
-    }
-    a#geolocate_link {
-        background-color: transparent;
-        padding: 0;
-        color: $link-color;
-        &:hover,
-        &:active,
-        &:focus {
-            background-color: transparent;
-            text-decoration: underline
-        }
     }
 }
 
@@ -133,5 +123,16 @@ a,
         text-decoration: underline;
         margin: 0 0.5em;
         font-size: 1.1em;
+    }
+}
+
+.covid-banner {
+    background-color: #AF5412;
+    color: white;
+    padding: 2em;
+    font-size: 1.2em;
+    a {
+        text-decoration: underline;
+        color: white;
     }
 }

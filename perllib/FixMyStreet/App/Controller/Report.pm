@@ -85,14 +85,32 @@ sub display :PathPart('') :Chained('id') :Args(0) {
     $c->forward( 'load_updates' );
     $c->forward( 'format_problem_for_display' );
 
-    my $permissions = $c->stash->{_permissions} ||= $c->forward( 'check_has_permission_to',
-        [ qw/report_inspect report_edit_category report_edit_priority report_mark_private triage/ ] );
-    if (any { $_ } values %$permissions) {
+    my $permissions = $c->stash->{permissions} ||= $c->forward('fetch_permissions');
+
+    my $staff_user = $c->user_exists && ($c->user->is_superuser || $c->user->belongs_to_body($c->stash->{problem}->bodies_str));
+
+    if ($staff_user) {
+        # Check assigned categories feature
+        my $okay = 1;
+        my $contact = $c->stash->{problem}->contact;
+        if ($contact && ($c->user->get_extra_metadata('assigned_categories_only') || $contact->get_extra_metadata('assigned_users_only'))) {
+            my $user_cats = $c->user->get_extra_metadata('categories') || [];
+            $okay = any { $contact->id eq $_ } @$user_cats;
+        }
+        if ($okay) {
+            $c->stash->{relevant_staff_user} = 1;
+        } else {
+            # Remove all staff permissions
+            $permissions = $c->stash->{permissions} = {};
+        }
+    }
+
+    if (grep { $permissions->{$_} } qw/report_inspect report_edit_category report_edit_priority report_mark_private triage/) {
         $c->stash->{template} = 'report/inspect.html';
         $c->forward('inspect');
     }
 
-    if ($c->user_exists && $c->user->has_permission_to(contribute_as_another_user => $c->stash->{problem}->bodies_str_ids)) {
+    if ($permissions->{contribute_as_another_user}) {
         $c->stash->{email} = $c->user->email;
     }
 }
@@ -133,11 +151,13 @@ sub support :Chained('id') :Args(0) {
 sub load_problem_or_display_error : Private {
     my ( $self, $c, $id ) = @_;
 
+    my $attrs = { prefetch => 'contact' };
+
     # try to load a report if the id is a number
     my $problem
       = ( !$id || $id =~ m{\D} ) # is id non-numeric?
       ? undef                    # ...don't even search
-      : $c->cobrand->problems->find( { id => $id } )
+      : $c->cobrand->problems->find( { id => $id }, $attrs )
           or $c->detach( '/page_error_404_not_found', [ _('Unknown problem ID') ] );
 
     # check that the problem is suitable to show.
@@ -158,9 +178,17 @@ sub load_problem_or_display_error : Private {
     } elsif ( $problem->non_public ) {
         # Creator, and inspection users can see non_public reports
         $c->stash->{problem} = $problem;
-        my $permissions = $c->stash->{_permissions} = $c->forward( 'check_has_permission_to',
-            [ qw/report_inspect report_edit_category report_edit_priority report_mark_private / ] );
-        if ( !$c->user || ($c->user->id != $problem->user->id && !($permissions->{report_inspect} || $permissions->{report_mark_private})) ) {
+        my $permissions = $c->stash->{permissions} = $c->forward('fetch_permissions');
+
+        # If someone has clicked a unique token link in an email to them
+        my $from_email = $c->sessionid && $c->flash->{alert_to_reporter} && $c->flash->{alert_to_reporter} == $problem->id;
+
+        my $allowed = 0;
+        $allowed = 1 if $from_email;
+        $allowed = 1 if $c->user_exists && $c->user->id == $problem->user->id;
+        $allowed = 1 if $permissions->{report_inspect} || $permissions->{report_mark_private};
+
+        unless  ($allowed) {
             my $url = '/auth?r=report/' . $problem->id;
             $c->detach(
                 '/page_error_403_access_denied',
@@ -169,6 +197,7 @@ sub load_problem_or_display_error : Private {
         }
     }
 
+    $c->cobrand->call_hook(munge_problem_list => $problem);
     $c->stash->{problem} = $problem;
     if ( $c->user_exists && $c->user->can_moderate($problem) ) {
         $c->stash->{problem_original} = $problem->find_or_new_related(
@@ -223,6 +252,7 @@ sub load_updates : Private {
     my @combined;
     my %questionnaires_with_updates;
     while (my $update = $updates->next) {
+        $c->cobrand->call_hook(munge_update_list => $update);
         push @combined, [ $update->confirmed, $update ];
         if (my $qid = $update->get_extra_metadata('questionnaire_id')) {
             $questionnaires_with_updates{$qid} = $update;
@@ -299,7 +329,8 @@ sub format_problem_for_display : Private {
         delete $report_hashref->{created};
         delete $report_hashref->{confirmed};
 
-        my $content = encode_json(
+        my $json = JSON::MaybeXS->new( convert_blessed => 1, utf8 => 1 );
+        my $content = $json->encode(
             {
                 report => $report_hashref,
                 updates => $c->cobrand->updates_as_hashref( $problem, $c ),
@@ -374,7 +405,7 @@ sub delete :Chained('id') :Args(0) {
 sub inspect : Private {
     my ( $self, $c ) = @_;
     my $problem = $c->stash->{problem};
-    my $permissions = $c->stash->{_permissions};
+    my $permissions = $c->stash->{permissions};
 
     $c->forward('/admin/reports/categories_for_point');
     $c->stash->{report_meta} = { map { 'x' . $_->{name} => $_ } @{ $c->stash->{problem}->get_extra_fields() } };
@@ -435,7 +466,7 @@ sub inspect : Private {
                 }
             }
 
-            if ( $c->get_param('include_update') ) {
+            if ( $c->get_param('include_update') or $c->get_param('raise_defect') ) {
                 $update_text = Utils::cleanup_text( $c->get_param('public_update'), { allow_multiline => 1 } );
                 if (!$update_text) {
                     $valid = 0;
@@ -480,6 +511,14 @@ sub inspect : Private {
                 };
                 $c->user->create_alert($problem->id, $options);
             }
+
+            # If the state has been changed to action scheduled and they've said
+            # they want to raise a defect, consider the report to be inspected.
+            if ($problem->state eq 'action scheduled' && $c->get_param('raise_defect') && !$problem->get_extra_metadata('inspected')) {
+                $update_params{extra} = { 'defect_raised' => 1 };
+                $problem->set_extra_metadata( inspected => 1 );
+                $c->forward( '/admin/log_edit', [ $problem->id, 'problem', 'inspected' ] );
+            }
         }
 
         $problem->non_public($c->get_param('non_public') ? 1 : 0);
@@ -523,6 +562,12 @@ sub inspect : Private {
 
         $c->cobrand->call_hook(report_inspect_update_extra => $problem);
 
+        $c->forward('/photo/process_photo');
+        if ( my $photo_error  = delete $c->stash->{photo_error} ) {
+            $valid = 0;
+            push @{ $c->stash->{errors} }, $photo_error;
+        }
+
         if ($valid) {
             $problem->lastupdate( \'current_timestamp' );
             $problem->update;
@@ -548,6 +593,7 @@ sub inspect : Private {
                     state => 'confirmed',
                     mark_fixed => 0,
                     anonymous => 0,
+                    photo => $c->stash->{upload_fileid} || undef,
                     %update_params,
                 } );
             }
@@ -590,7 +636,13 @@ sub inspect : Private {
 sub map :Chained('id') :Args(0) {
     my ($self, $c) = @_;
 
-    my $image = $c->stash->{problem}->static_map;
+    my %params;
+    if ( $c->get_param('inline_duplicate') ) {
+        $params{full_size} = 1;
+        $params{zoom} = 5;
+    }
+
+    my $image = $c->stash->{problem}->static_map(%params);
     $c->res->content_type($image->{content_type});
     $c->res->body($image->{data});
 }
@@ -639,7 +691,7 @@ sub _nearby_json :Private {
 
     my $list_html = $c->render_fragment(
         'report/nearby.html',
-        { reports => $nearby }
+        { reports => $nearby, inline_maps => $c->get_param("inline_maps") ? 1 : 0 }
     );
 
     my $json = { pins => \@pins };
@@ -650,30 +702,26 @@ sub _nearby_json :Private {
 }
 
 
-=head2 check_has_permission_to
+=head2 fetch_permissions
 
-Ensure the currently logged-in user has any of the provided permissions applied
-to the current Problem in $c->stash->{problem}. Shows the 403 page if not.
+Returns a hash of the user's permissions, applied to the problem
+in $c->stash->{problem}.
 
 =cut
 
-sub check_has_permission_to : Private {
-    my ( $self, $c, @permissions ) = @_;
+sub fetch_permissions : Private {
+    my ( $self, $c ) = @_;
     return {} unless $c->user_exists;
-    my $bodies = $c->stash->{problem}->bodies_str_ids;
-    my %permissions = map { $_ => $c->user->has_permission_to($_, $bodies) } @permissions;
-    return \%permissions;
+    return $c->user->permissions($c->stash->{problem});
 };
-
 
 sub stash_category_groups : Private {
     my ( $self, $c, $contacts, $combine_multiple ) = @_;
 
     my %category_groups = ();
     for my $category (@$contacts) {
-        my $group = $category->{group} // $category->get_extra_metadata('group') // [''];
-        # this could be an array ref or a string
-        my @groups = ref $group eq 'ARRAY' ? @$group : ($group);
+        my $group = $category->{group} // $category->groups;
+        my @groups = @$group;
         if (scalar @groups > 1 && $combine_multiple) {
             @groups = sort @groups;
             $category->{group} = \@groups;
@@ -690,6 +738,19 @@ sub stash_category_groups : Private {
     push @category_groups, { name => _('Other'), categories => $category_groups{_('Other')} } if ($category_groups{_('Other')});
     push @category_groups, { name => _('Multiple Groups'), categories => $category_groups{_('Multiple Groups')} } if ($category_groups{_('Multiple Groups')});
     $c->stash->{category_groups}  = \@category_groups;
+}
+
+sub assigned_users_only : Private {
+    my ($self, $c, $categories) = @_;
+
+    # Assigned only category checking
+    if ($c->user_exists && $c->user->from_body) {
+        my @assigned_users_only = grep { $_->get_extra_metadata('assigned_users_only') } @$categories;
+        $c->stash->{assigned_users_only} = { map { $_->category => 1 } @assigned_users_only };
+        $c->stash->{assigned_categories_only} = $c->user->get_extra_metadata('assigned_categories_only');
+
+        $c->stash->{user_categories} = { map { $_ => 1 } @{$c->user->categories} };
+    }
 }
 
 __PACKAGE__->meta->make_immutable;

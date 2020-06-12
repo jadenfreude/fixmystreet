@@ -3,9 +3,11 @@ use base 'FixMyStreet::Cobrand::Default';
 use strict;
 
 use JSON::MaybeXS;
+use LWP::UserAgent;
 use mySociety::MaPit;
 use mySociety::VotingArea;
 use Utils;
+use HighwaysEngland;
 
 sub country             { return 'GB'; }
 sub area_types          { [ 'DIS', 'LBO', 'MTD', 'UTA', 'CTY', 'COI', 'LGD' ] }
@@ -89,17 +91,10 @@ sub geocode_postcode {
             latitude  => $location->{wgs84_lat},
             longitude => $location->{wgs84_lon},
         };
+    } elsif (my $junction_location = HighwaysEngland::junction_lookup($s)) {
+        return $junction_location;
     }
     return {};
-}
-
-sub remove_redundant_areas {
-  my $self = shift;
-  my $all_areas = shift;
-
-  # Norwich is responsible for everything in its areas, not Norfolk
-  delete $all_areas->{2233}    #
-    if $all_areas->{2391};
 }
 
 sub short_name {
@@ -370,9 +365,11 @@ sub get_body_handler_for_problem {
     if ($row->to_body_named('TfL')) {
         return FixMyStreet::Cobrand::TfL->new;
     }
+    # Do not do anything for Highways England here, as we don't want it to
+    # treat this as a cobrand for e.g. submit report emails made on .com
 
     my @bodies = values %{$row->bodies};
-    my %areas = map { %{$_->areas} } grep { $_->name ne 'TfL' } @bodies;
+    my %areas = map { %{$_->areas} } grep { $_->name !~ /TfL|Highways England/ } @bodies;
 
     my $cobrand = FixMyStreet::Cobrand->body_handler(\%areas);
     return $cobrand if $cobrand;
@@ -411,12 +408,6 @@ sub lookup_by_ref_regex {
     return qr/^\s*(\d+)\s*$/;
 }
 
-sub category_extra_hidden {
-    my ($self, $meta) = @_;
-    return 1 if $meta->{code} eq 'usrn' || $meta->{code} eq 'asset_id';
-    return $self->SUPER::category_extra_hidden($meta);
-}
-
 sub report_new_munge_before_insert {
     my ($self, $report) = @_;
 
@@ -424,6 +415,38 @@ sub report_new_munge_before_insert {
         my $tfl = FixMyStreet::Cobrand->get_class_for_moniker('tfl')->new();
         $tfl->report_new_munge_before_insert($report);
     }
+}
+
+# To use recaptcha, add a RECAPTCHA key to your config, with subkeys secret and
+# site_key, taken from the recaptcha site. This shows it to non-UK IP addresses
+# on alert and report pages.
+
+sub requires_recaptcha {
+    my $self = shift;
+    my $c = $self->{c};
+
+    return 0 if $c->user_exists;
+    return 0 if !FixMyStreet->config('RECAPTCHA');
+    return 0 if $c->user_country eq 'GB';
+    return 0 unless $c->action =~ /^(alert|report)/;
+    return 1;
+}
+
+sub check_recaptcha {
+    my $self = shift;
+    my $c = $self->{c};
+
+    return unless $self->requires_recaptcha;
+
+    my $url = 'https://www.google.com/recaptcha/api/siteverify';
+    my $res = LWP::UserAgent->new->post($url, {
+        secret => FixMyStreet->config('RECAPTCHA')->{secret},
+        response => $c->get_param('g-recaptcha-response'),
+        remoteip => $c->req->address,
+    });
+    $res = decode_json($res->content);
+    $c->detach('/page_error_400_bad_request', ['Bad recaptcha'])
+        unless $res->{success};
 }
 
 1;

@@ -368,8 +368,8 @@ sub construct_email {
     my $vars = {
         from => [ $sender, _($sender_name) ],
         %{ $c->stash },
-        %$extra_stash_values,
         additional_template_paths => \@include_path,
+        %$extra_stash_values,
     };
     $vars->{site_name} = Utils::trim_text($c->view('EmailText')->render($c, 'site-name.txt', $vars));
     $vars->{signature} = $c->view('EmailText')->render($c, 'signature.txt', $vars);
@@ -534,6 +534,11 @@ sub check_2fa {
         $c->stash->{incorrect_code} = 1;
     }
     return 0;
+}
+
+sub user_country {
+    my $c = shift;
+    return FixMyStreet::Gaze::get_country_from_ip($c->req->address);
 }
 
 =head1 SEE ALSO

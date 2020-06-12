@@ -61,58 +61,29 @@ Displays some summary information for the requests.
 sub index : Path : Args(0) {
     my ( $self, $c ) = @_;
 
-    if ($c->cobrand->moniker eq 'zurich' && $c->stash->{admin_type} ne 'super') {
-        return $c->cobrand->admin();
+    if ($c->cobrand->moniker eq 'zurich') {
+        if ($c->stash->{admin_type} eq 'super') {
+            $c->forward('/admin/stats/gather');
+            return 1;
+        } else {
+            return $c->cobrand->admin();
+        }
     }
 
-    $c->forward('/admin/stats/state');
-
     my @unsent = $c->cobrand->problems->search( {
-        state => [ FixMyStreet::DB::Result::Problem::open_states() ],
+        'me.state' => [ FixMyStreet::DB::Result::Problem::open_states() ],
         whensent => undef,
         bodies_str => { '!=', undef },
         # Ignore very recent ones that probably just haven't been sent yet
         confirmed => { '<', \"current_timestamp - '5 minutes'::interval" },
+    },
+    {
+        '+columns' => ['user.email'],
+        prefetch => 'contact',
+        join => 'user',
+        order_by => 'confirmed',
     } )->all;
     $c->stash->{unsent_reports} = \@unsent;
-
-    my $alerts = $c->model('DB::Alert')->summary_report_alerts( $c->cobrand->restriction );
-
-    my %alert_counts =
-      map { $_->confirmed => $_->get_column('confirmed_count') } $alerts->all;
-
-    $alert_counts{0} ||= 0;
-    $alert_counts{1} ||= 0;
-
-    $c->stash->{alerts} = \%alert_counts;
-
-    my $contacts = $c->model('DB::Contact')->summary_count();
-
-    my %contact_counts =
-      map { $_->state => $_->get_column('state_count') } $contacts->all;
-
-    $contact_counts{confirmed} ||= 0;
-    $contact_counts{unconfirmed} ||= 0;
-    $contact_counts{total} = $contact_counts{confirmed} + $contact_counts{unconfirmed};
-
-    $c->stash->{contacts} = \%contact_counts;
-
-    my $questionnaires = $c->model('DB::Questionnaire')->summary_count( $c->cobrand->restriction );
-
-    my %questionnaire_counts = map {
-        $_->get_column('answered') => $_->get_column('questionnaire_count')
-    } $questionnaires->all;
-    $questionnaire_counts{1} ||= 0;
-    $questionnaire_counts{0} ||= 0;
-
-    $questionnaire_counts{total} =
-      $questionnaire_counts{0} + $questionnaire_counts{1};
-    $c->stash->{questionnaires_pc} =
-      $questionnaire_counts{total}
-      ? sprintf( '%.1f',
-        $questionnaire_counts{1} / $questionnaire_counts{total} * 100 )
-      : _('n/a');
-    $c->stash->{questionnaires} = \%questionnaire_counts;
 
     $c->forward('fetch_all_bodies');
 
@@ -177,7 +148,7 @@ sub fetch_contacts : Private {
 
     my $contacts = $c->stash->{body}->contacts->search(undef, { order_by => [ 'category' ] } );
     $c->stash->{contacts} = $contacts;
-    $c->stash->{live_contacts} = $contacts->not_deleted;
+    $c->stash->{live_contacts} = $contacts->not_deleted_admin;
     $c->stash->{any_not_confirmed} = $contacts->search({ state => 'unconfirmed' })->count;
 
     if ( $c->get_param('text') && $c->get_param('text') eq '1' ) {
@@ -333,7 +304,14 @@ sub add_flags : Private {
 sub flagged : Path('flagged') : Args(0) {
     my ( $self, $c ) = @_;
 
-    my $problems = $c->cobrand->problems->search( { flagged => 1 } );
+    my $problems = $c->cobrand->problems->search(
+        { 'me.flagged' => 1 },
+        {
+            '+columns' => ['user.email'],
+            join => 'user',
+            prefetch => 'contact',
+        }
+    );
 
     # pass in as array ref as using same template as search_reports
     # which has to use an array ref for sql quoting reasons
@@ -369,8 +347,8 @@ sub set_allowed_pages : Private {
 sub get_user : Private {
     my ( $self, $c ) = @_;
 
-    my $user = $c->req->remote_user();
-    $user ||= ($c->user && $c->user->name);
+    my $user = ($c->user && $c->user->name);
+    $user ||= $c->req->remote_user();
     $user ||= '';
 
     return $user;

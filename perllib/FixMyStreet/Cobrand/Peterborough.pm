@@ -40,16 +40,30 @@ sub geocoder_munge_results {
 
 sub admin_user_domain { "peterborough.gov.uk" }
 
-around 'open311_config' => sub {
-    my ($orig, $self, $row, $h, $params) = @_;
+around open311_extra_data => sub {
+    my ($orig, $self, $row, $h, $extra) = @_;
 
-    # remove the emergency category which is informational only
-    my $extra = $row->get_extra_fields;
-    @$extra = grep { $_->{name} ne 'emergency' } @$extra;
-    $row->set_extra_fields(@$extra);
-
-    $self->$orig($row, $h, $params);
+    my $open311_only = $self->$orig($row, $h, $extra);
+    foreach (@$open311_only) {
+        if ($_->{name} eq 'description') {
+            my ($ref) = grep { $_->{name} =~ /pcc-Skanska-csc-ref/i } @{$row->get_extra_fields};
+            $_->{value} .= "\n\nSkanska CSC ref: $ref->{value}" if $ref;
+        }
+    }
+    return $open311_only;
 };
+
+# remove categories which are informational only
+sub open311_pre_send {
+    my ($self, $row, $open311) = @_;
+
+    return unless $row->extra;
+    my $extra = $row->get_extra_fields;
+    if (@$extra) {
+        @$extra = grep { $_->{name} !~ /^(PCC-|emergency$|private_land$)/i } @$extra;
+        $row->set_extra_fields(@$extra);
+    }
+}
 
 sub lookup_site_code_config { {
     buffer => 50, # metres
@@ -67,6 +81,19 @@ sub open311_munge_update_params {
     # Peterborough want to make it clear in Confirm when an update has come
     # from FMS.
     $params->{description} = "[Customer FMS update] " . $params->{description};
+
+    # Send the FMS problem ID with the update.
+    $params->{service_request_id_ext} = $comment->problem->id;
+
+    my $contact = $comment->problem->contact;
+    $params->{service_code} = $contact->email;
 }
+
+around 'open311_config' => sub {
+    my ($orig, $self, $row, $h, $params) = @_;
+
+    $params->{upload_files} = 1;
+    $self->$orig($row, $h, $params);
+};
 
 1;

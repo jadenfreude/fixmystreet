@@ -16,7 +16,6 @@ var defaults = {
     },
     asset_type: 'spot',
     max_resolution: 2.388657133579254,
-    min_resolution: 0.5971642833948135,
     geometryName: 'msGeometry',
     srsName: "EPSG:3857",
     strategy_class: OpenLayers.Strategy.FixMyStreet
@@ -36,7 +35,7 @@ var tlrn_stylemap = new OpenLayers.StyleMap({
         fillColor: "#ff0000",
         fillOpacity: 0.3,
         strokeColor: "#ff0000",
-        strokeOpacity: 0.6,
+        strokeOpacity: 1,
         strokeWidth: 2
     })
 });
@@ -51,7 +50,6 @@ var tlrn_categories = [
     "Debris in the carriageway",
     "Fallen Tree",
     "Flooding",
-    "Flytipping (TfL)",
     "Graffiti / Flyposting (non-offensive)",
     "Graffiti / Flyposting (offensive)",
     "Graffiti / Flyposting on street light (non-offensive)",
@@ -66,12 +64,15 @@ var tlrn_categories = [
     "Mobile Crane Operation",
     "Other (TfL)",
     "Pavement Defect (uneven surface / cracked paving slab)",
+    "Pavement Overcrowding",
     "Pothole",
     "Pothole (minor)",
     "Roadworks",
     "Scaffolding blocking carriageway or footway",
     "Single Light out (street light)",
     "Standing water",
+    "Street Light - Equipment damaged, pole leaning",
+    "Streetspace Suggestions and Feedback",
     "Unstable hoardings",
     "Unstable scaffolding",
     "Worn out road markings"
@@ -178,6 +179,7 @@ fixmystreet.assets.add(asset_defaults, {
     asset_id_field: 'STOP_CODE',
     attributes: {
         stop_code: 'STOP_CODE',
+        shelter_id: 'SHELTER_ID',
     },
     asset_group: "Bus Stops and Shelters",
     asset_item: 'bus stop'

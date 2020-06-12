@@ -35,15 +35,19 @@ sub restriction {
     return {};
 }
 
-# FixMyStreet needs to not show TfL reports...
+# FixMyStreet needs to not show TfL reports or Bromley waste reports
 sub problems_restriction {
     my ($self, $rs) = @_;
     my $table = ref $rs eq 'FixMyStreet::DB::ResultSet::Nearby' ? 'problem' : 'me';
-    return $rs->search({ "$table.cobrand" => { '!=' => 'tfl' } });
+    return $rs->search({
+        "$table.cobrand" => { '!=' => 'tfl' },
+        "$table.cobrand_data" => { '!=' => 'waste' },
+    });
 }
 sub problems_sql_restriction {
     my $self = shift;
     return "AND cobrand != 'tfl'";
+    # Doesn't need Bromley one as all waste reports non-public
 }
 
 sub relative_url_for_report {
@@ -54,58 +58,88 @@ sub relative_url_for_report {
 sub munge_around_category_where {
     my ($self, $where) = @_;
 
-    my $user = $self->{c}->user;
-    my @iow = grep { $_->name eq 'Isle of Wight Council' } @{ $self->{c}->stash->{around_bodies} };
-    return unless @iow;
-
-    # display all the categories on Isle of Wight at the moment as there's no way to
-    # do the expand bit later as we fetch it using ajax which uses a bounding box so
-    # can't determine the body
-    $where->{send_method} = [ { '!=' => 'Triage' }, undef ];
-    return $where;
+    my $iow = grep { $_->name eq 'Isle of Wight Council' } @{ $self->{c}->stash->{around_bodies} };
+    if ($iow) {
+        # display all the categories on Isle of Wight at the moment as there's no way to
+        # do the expand bit later as we fetch it using ajax which uses a bounding box so
+        # can't determine the body
+        $where->{send_method} = [ { '!=' => 'Triage' }, undef ];
+    }
+    my $bromley = grep { $_->name eq 'Bromley Council' } @{ $self->{c}->stash->{around_bodies} };
+    if ($bromley) {
+        $where->{extra} = [ undef, { -not_like => '%Waste%' } ];
+    }
 }
 
-sub munge_reports_categories_list {
+sub _iow_category_munge {
+    my ($self, $body, $categories) = @_;
+    my $user = $self->{c}->user;
+
+    if ( $user && ( $user->is_superuser || $user->belongs_to_body( $body->id ) ) ) {
+        @$categories = grep { !$_->send_method || $_->send_method ne 'Triage' } @$categories;
+        return;
+    }
+
+    @$categories = grep { $_->send_method && $_->send_method eq 'Triage' } @$categories;
+}
+
+sub munge_reports_category_list {
     my ($self, $categories) = @_;
 
     my %bodies = map { $_->body->name => $_->body } @$categories;
-    if ( $bodies{'Isle of Wight Council'} ) {
-        my $user = $self->{c}->user;
-        my $b = $bodies{'Isle of Wight Council'};
-
-        if ( $user && ( $user->is_superuser || $user->belongs_to_body( $b->id ) ) ) {
-            @$categories = grep { !$_->send_method || $_->send_method ne 'Triage' } @$categories;
-            return @$categories;
-        }
-
-        @$categories = grep { $_->send_method && $_->send_method eq 'Triage' } @$categories;
-        return @$categories;
+    if ( my $body = $bodies{'Isle of Wight Council'} ) {
+        return $self->_iow_category_munge($body, $categories);
+    }
+    if ( $bodies{'Bromley Council'} ) {
+        @$categories = grep { grep { $_ ne 'Waste' } @{$_->groups} } @$categories;
     }
 }
 
-sub munge_report_new_category_list {
-    my ($self, $options, $contacts, $extras) = @_;
+sub munge_reports_area_list {
+    my ($self, $areas) = @_;
+    my $c = $self->{c};
+    if ($c->stash->{body}->name eq 'TfL') {
+        my %london_hash = map { $_ => 1 } FixMyStreet::Cobrand::TfL->london_boroughs;
+        @$areas = grep { $london_hash{$_} } @$areas;
+    }
+}
+
+sub munge_report_new_bodies {
+    my ($self, $bodies) = @_;
+
+    my %bodies = map { $_->name => 1 } values %$bodies;
+    if ( $bodies{'TfL'} ) {
+        # Presented categories vary if we're on/off a red route
+        my $tfl = FixMyStreet::Cobrand::TfL->new({ c => $self->{c} });
+        $tfl->munge_surrounding_london($bodies);
+    }
+
+    if ( $bodies{'Highways England'} ) {
+        my $c = $self->{c};
+        my $he = FixMyStreet::Cobrand::HighwaysEngland->new({ c => $c });
+        my $on_he_road = $c->stash->{on_he_road} = $he->report_new_is_on_he_road;
+
+        if (!$on_he_road) {
+            %$bodies = map { $_->id => $_ } grep { $_->name ne 'Highways England' } values %$bodies;
+        }
+    }
+}
+
+sub munge_report_new_contacts {
+    my ($self, $contacts) = @_;
 
     my %bodies = map { $_->body->name => $_->body } @$contacts;
 
-    if ( $bodies{'Isle of Wight Council'} ) {
-        my $user = $self->{c}->user;
-        if ( $user && ( $user->is_superuser || $user->belongs_to_body( $bodies{'Isle of Wight Council'}->id ) ) ) {
-            @$contacts = grep { !$_->send_method || $_->send_method ne 'Triage' } @$contacts;
-            my $seen = { map { $_->category => 1 } @$contacts };
-            @$options = grep { my $c = ($_->{category} || $_->category); $c =~ 'Pick a category' || $seen->{ $c } } @$options;
-            return;
-        }
-
-        @$contacts = grep { $_->send_method && $_->send_method eq 'Triage' } @$contacts;
-        my $seen = { map { $_->category => 1 } @$contacts };
-        @$options = grep { my $c = ($_->{category} || $_->category); $c =~ 'Pick a category' || $seen->{ $c } } @$options;
+    if ( my $body = $bodies{'Isle of Wight Council'} ) {
+        return $self->_iow_category_munge($body, $contacts);
     }
-
+    if ( $bodies{'Bromley Council'} ) {
+        @$contacts = grep { grep { $_ ne 'Waste' } @{$_->groups} } @$contacts;
+    }
     if ( $bodies{'TfL'} ) {
         # Presented categories vary if we're on/off a red route
         my $tfl = FixMyStreet::Cobrand->get_class_for_moniker( 'tfl' )->new({ c => $self->{c} });
-        $tfl->munge_red_route_categories($options, $contacts);
+        $tfl->munge_red_route_categories($contacts);
     }
 
 }
@@ -113,53 +147,10 @@ sub munge_report_new_category_list {
 sub munge_load_and_group_problems {
     my ($self, $where, $filter) = @_;
 
-    return unless $where->{category} && $self->{c}->stash->{body}->name eq 'Isle of Wight Council';
+    return unless $where->{'me.category'} && $self->{c}->stash->{body}->name eq 'Isle of Wight Council';
 
-    $where->{category} = $self->expand_triage_cat_list($where->{category});
-}
-
-sub expand_triage_cat_list {
-    my ($self, $categories) = @_;
-
-    my $b = $self->{c}->stash->{body};
-
-    my $all_cats = $self->{c}->model('DB::Contact')->not_deleted->search(
-        {
-            body_id => $b->id,
-            send_method => [{ '!=', 'Triage'}, undef]
-        }
-    );
-
-    my %group_to_category;
-    while ( my $cat = $all_cats->next ) {
-        next unless $cat->get_extra_metadata('group');
-        my $groups = $cat->get_extra_metadata('group');
-        $groups = ref $groups eq 'ARRAY' ? $groups : [ $groups ];
-        for my $group ( @$groups ) {
-            $group_to_category{$group} //= [];
-            push @{ $group_to_category{$group} }, $cat->category;
-        }
-    }
-
-    my $cats = $self->{c}->model('DB::Contact')->not_deleted->search(
-        {
-            body_id => $b->id,
-            category => $categories
-        }
-    );
-
-    my @cat_names;
-    while ( my $cat = $cats->next ) {
-        if ( $cat->send_method && $cat->send_method eq 'Triage' ) {
-            # include the category itself
-            push @cat_names, $cat->category;
-            push @cat_names, @{ $group_to_category{$cat->category} } if $group_to_category{$cat->category};
-        } else {
-            push @cat_names, $cat->category;
-        }
-    }
-
-    return \@cat_names;
+    my $iow = FixMyStreet::Cobrand->get_class_for_moniker( 'isleofwight' )->new({ c => $self->{c} });
+    $where->{'me.category'} = $iow->expand_triage_cat_list($where->{'me.category'}, $self->{c}->stash->{body});
 }
 
 sub title_list {
@@ -282,22 +273,22 @@ sub about_hook {
     }
 }
 
-sub updates_disallowed_config {
-    my ($self, $problem) = @_;
+sub per_body_config {
+    my ($self, $feature, $problem) = @_;
 
     # This is a hash of council name to match, and what to do
-    my $cfg = $self->feature('updates_allowed') || {};
+    my $cfg = $self->feature($feature) || {};
 
-    my $type = '';
+    my $value;
     my $body;
     foreach (keys %$cfg) {
         if ($problem->to_body_named($_)) {
-            $type = $cfg->{$_};
+            $value = $cfg->{$_};
             $body = $_;
             last;
         }
     }
-    return ($type, $body);
+    return ($value, $body);
 }
 
 sub updates_disallowed {
@@ -305,7 +296,8 @@ sub updates_disallowed {
     my ($problem) = @_;
     my $c = $self->{c};
 
-    my ($type, $body) = $self->updates_disallowed_config($problem);
+    my ($type, $body) = $self->per_body_config('updates_allowed', $problem);
+    $type //= '';
 
     if ($type eq 'none') {
         return 1;
@@ -345,15 +337,22 @@ sub must_have_2fa {
 
 sub send_questionnaire {
     my ($self, $problem) = @_;
-    my $cobrand = $problem->get_cobrand_logged;
-    return 0 if $cobrand->moniker eq 'tfl';
-    return 0 if $problem->to_body_named('TfL');
-    return 1;
+    my ($send, $body) = $self->per_body_config('send_questionnaire', $problem);
+    return $send // 1;
 }
 
 sub update_email_shortlisted_user {
     my ($self, $update) = @_;
     FixMyStreet::Cobrand::TfL::update_email_shortlisted_user($self, $update);
+}
+
+sub manifest {
+    return {
+        related_applications => [
+            { platform => 'play', url => 'https://play.google.com/store/apps/details?id=org.mysociety.FixMyStreet', id => 'org.mysociety.FixMyStreet' },
+            { platform => 'itunes', url => 'https://apps.apple.com/gb/app/fixmystreet/id297456545', id => 'id297456545' },
+        ],
+    };
 }
 
 1;

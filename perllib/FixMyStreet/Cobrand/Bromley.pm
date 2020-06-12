@@ -6,7 +6,12 @@ use warnings;
 use utf8;
 use DateTime::Format::W3CDTF;
 use DateTime::Format::Flexible;
+use Integrations::Echo;
+use LWP::Simple qw(get);
+use JSON::MaybeXS;
+use Sort::Key::Natural qw(natkeysort_inplace);
 use Try::Tiny;
+use URI::Escape qw(uri_escape_utf8);
 use FixMyStreet::DateRange;
 
 sub council_area_id { return 2482; }
@@ -132,20 +137,25 @@ sub tweak_all_reports_map {
     # A place where this can happen
     return unless $c->action eq 'dashboard/heatmap';
 
-    # Bromley only subcategory stuff
+    # Bromley uses an extra attribute question to store 'subcategory',
+    # rather than group/category, but wants this extra question to act
+    # like a subcategory e.g. in the dashboard filter here.
     my %subcats = $self->subcategories;
-    my $filter = $c->stash->{filter_categories};
-    my @new_contacts;
-    foreach (@$filter) {
-        push @new_contacts, $_;
-        foreach (@{$subcats{$_->id}}) {
-            push @new_contacts, {
-                category => $_->{key},
-                category_display => (" " x 4) . $_->{name},
-            };
+    my $groups = $c->stash->{category_groups};
+    foreach (@$groups) {
+        my $filter = $_->{categories};
+        my @new_contacts;
+        foreach (@$filter) {
+            push @new_contacts, $_;
+            foreach (@{$subcats{$_->id}}) {
+                push @new_contacts, {
+                    category => $_->{key},
+                    category_display => (" " x 4) . $_->{name},
+                };
+            }
         }
+        $_->{categories} = \@new_contacts;
     }
-    $c->stash->{filter_categories} = \@new_contacts;
 
     if (!%{$c->stash->{filter_category}}) {
         my $cats = $c->user->categories;
@@ -161,7 +171,14 @@ sub title_list {
 sub open311_config {
     my ($self, $row, $h, $params) = @_;
 
-    my $extra = $row->get_extra_fields;
+    $params->{always_send_latlong} = 0;
+    $params->{send_notpinpointed} = 1;
+    $params->{extended_description} = 0;
+}
+
+sub open311_extra_data {
+    my ($self, $row, $h, $extra) = @_;
+
     my $title = $row->title;
 
     foreach (@$extra) {
@@ -169,9 +186,8 @@ sub open311_config {
         $title .= ' | ID: ' . $_->{value} if $_->{name} eq 'feature_id';
         $title .= ' | PROW ID: ' . $_->{value} if $_->{name} eq 'prow_reference';
     }
-    @$extra = grep { $_->{name} !~ /feature_id|prow_reference/ } @$extra;
 
-    push @$extra,
+    my $open311_only = [
         { name => 'report_url',
           value => $h->{url} },
         { name => 'report_title',
@@ -183,23 +199,20 @@ sub open311_config {
         { name => 'requested_datetime',
           value => DateTime::Format::W3CDTF->format_datetime($row->confirmed->set_nanosecond(0)) },
         { name => 'email',
-          value => $row->user->email };
+          value => $row->user->email }
+    ];
 
     # make sure we have last_name attribute present in row's extra, so
     # it is passed correctly to Bromley as attribute[]
     if (!$row->get_extra_field_value('last_name')) {
         my ( $firstname, $lastname ) = ( $row->name =~ /(\S+)\.?\s+(.+)/ );
-        push @$extra, { name => 'last_name', value => $lastname };
+        push @$open311_only, { name => 'last_name', value => $lastname };
     }
     if (!$row->get_extra_field_value('fms_extra_title') && $row->user->title) {
-        push @$extra, { name => 'fms_extra_title', value => $row->user->title };
+        push @$open311_only, { name => 'fms_extra_title', value => $row->user->title };
     }
 
-    $row->set_extra_fields(@$extra);
-
-    $params->{always_send_latlong} = 0;
-    $params->{send_notpinpointed} = 1;
-    $params->{extended_description} = 0;
+    return ($open311_only, [ 'feature_id', 'prow_reference' ]);
 }
 
 sub open311_config_updates {
@@ -218,6 +231,11 @@ sub open311_pre_send {
         $extra->{title} = $row->user->title;
         $row->extra( $extra );
     }
+}
+
+sub open311_pre_send_updates {
+    my ($self, $row) = @_;
+    return $self->open311_pre_send($row);
 }
 
 sub open311_munge_update_params {
@@ -336,25 +354,201 @@ sub munge_load_and_group_problems {
     return unless $c->action eq 'dashboard/heatmap';
 
     # Bromley subcategory stuff
-    if (!$where->{category}) {
+    if (!$where->{'me.category'}) {
         my $cats = $c->user->categories;
         my $subcats = $c->user->get_extra_metadata('subcategories') || [];
-        $where->{category} = [ @$cats, @$subcats ] if @$cats || @$subcats;
+        $where->{'me.category'} = [ @$cats, @$subcats ] if @$cats || @$subcats;
     }
 
     my %subcats = $self->subcategories;
     my $subcat;
-    my %chosen = map { $_ => 1 } @{$where->{category} || []};
+    my %chosen = map { $_ => 1 } @{$where->{'me.category'} || []};
     my @subcat = grep { $chosen{$_} } map { $_->{key} } map { @$_ } values %subcats;
     if (@subcat) {
         my %chosen = map { $_ => 1 } @subcat;
         $where->{'-or'} = {
-            category => [ grep { !$chosen{$_} } @{$where->{category}} ],
-            subcategory => \@subcat,
+            'me.category' => [ grep { !$chosen{$_} } @{$where->{'me.category'}} ],
+            'me.subcategory' => \@subcat,
         };
-        delete $where->{category};
+        delete $where->{'me.category'};
     }
 }
 
-1;
+sub munge_around_category_where {
+    my ($self, $where) = @_;
+    $where->{extra} = [ undef, { -not_like => '%Waste%' } ];
+}
 
+sub munge_reports_category_list {
+    my ($self, $categories) = @_;
+    @$categories = grep { grep { $_ ne 'Waste' } @{$_->groups} } @$categories;
+}
+
+sub munge_report_new_contacts {
+    my ($self, $categories) = @_;
+
+    return if $self->{c}->action =~ /^hercules/;
+
+    @$categories = grep { grep { $_ ne 'Waste' } @{$_->groups} } @$categories;
+    $self->SUPER::munge_report_new_contacts($categories);
+}
+
+sub bin_addresses_for_postcode {
+    my $self = shift;
+    my $pc = shift;
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->FindPoints($pc);
+    return [] unless $result;
+
+    my $points = $result->{PointInfo};
+    return [] unless $points;
+    $points = [ $points ] unless ref $points eq 'ARRAY';
+    my $data = [ map { {
+        value => $_->{SharedRef}{Value}{anyType},
+        label => FixMyStreet::Template::title($_->{Description}),
+    } } @$points ];
+    natkeysort_inplace { $_->{label} } @$data;
+    return $data;
+}
+
+sub look_up_property {
+    my $self = shift;
+    my $uprn = shift;
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->GetPointAddress($uprn);
+    return {
+        address => $result->{Description},
+        latitude => $result->{Coordinates}{GeoPoint}{Latitude},
+        longitude => $result->{Coordinates}{GeoPoint}{Longitude},
+    };
+}
+
+my %irregulars = ( 1 => 'st', 2 => 'nd', 3 => 'rd', 11 => 'th', 12 => 'th', 13 => 'th');
+sub ordinal {
+    my $n = shift;
+    $irregulars{$n % 100} || $irregulars{$n % 10} || 'th';
+}
+
+sub construct_bin_date {
+    my $str = shift;
+    return unless $str;
+    my $offset = ($str->{OffsetMinutes} || 0) * 60;
+    my $zone = DateTime::TimeZone->offset_as_string($offset);
+    $zone =~ s/(\d\d)$/:$1/;
+    (my $date = $str->{DateTime}) =~ s/Z/$zone/;
+    $date = DateTime::Format::W3CDTF->parse_datetime($date);
+    return $date;
+}
+
+sub bin_services_for_address {
+    my $self = shift;
+    my $uprn = shift;
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->GetServiceUnitsForObject($uprn);
+    return [] unless $result;
+
+    my @out;
+    my $today = DateTime->today->set_time_zone(FixMyStreet->local_time_zone)->strftime("%F");
+    foreach (@{$result->{ServiceUnit}}) {
+        next unless $_->{ServiceTasks};
+
+        my $servicetask = $_->{ServiceTasks}{ServiceTask};
+        my $schedules = $servicetask->{ServiceTaskSchedules}{ServiceTaskSchedule};
+        $schedules = [ $schedules ] unless ref $schedules eq 'ARRAY';
+
+        my ($min_next, $max_last, $next_changed, $next_ordinal, $last_ordinal);
+        foreach my $schedule (@$schedules) {
+            my $end_date = construct_bin_date($schedule->{EndDate})->strftime("%F");
+            next if $end_date lt $today;
+
+            my $next = $schedule->{NextInstance}; # CurrentScheduledData->DateTime, Ref->Value->anyType, OriginalScheduledDate->DateTime
+            my $d = construct_bin_date($next->{CurrentScheduledDate});
+            if ($d && (!$min_next || $d < $min_next)) {
+                $min_next = $d;
+                $next_changed = $next->{CurrentScheduledDate}{DateTime} ne $next->{OriginalScheduledDate}{DateTime};
+            }
+
+            my $last = $schedule->{LastInstance}; # ditto
+            $d = construct_bin_date($last->{CurrentScheduledDate});
+            $max_last = $d if $d && (!$max_last || $d > $max_last);
+            # XXX Have to call getTask for each last instance to get its CompletedDate?
+
+            #$schedule->{ScheduleDescription};
+            #$schedule->{ScheduleId};
+            #$schedule->{Id};
+            #$schedule->{Allocation}; # Type RoundName RoundId RoundGroupName/Id RoundLegId RoundLegName
+        }
+
+        next unless $min_next or $max_last;
+        $next_ordinal = ordinal($min_next->day) if $min_next;
+        $last_ordinal = ordinal($max_last->day) if $max_last;
+
+        my %request_allowed = map { $_ => 1 } (535, 536, 537, 541, 542, 544);
+        my %service_name_override = (
+            531 => 'Non-Recyclable Waste',
+            532 => 'Non-Recyclable Waste',
+            533 => 'Non-Recyclable Waste',
+            535 => 'Mixed Recycling (Cans, Plastics & Glass)',
+            536 => 'Mixed Recycling (Cans, Plastics & Glass)',
+            537 => 'Paper & Cardboard',
+            541 => 'Paper & Cardboard',
+            542 => 'Food Waste',
+            544 => 'Food Waste',
+        );
+
+        $self->{c}->stash->{containers} = {
+            1 => 'Green Box (Plastic)',
+            2 => 'Wheeled Bin (Plastic)',
+            12 => 'Black Box (Paper)',
+            13 => 'Wheeled Bin (Paper)',
+            9 => 'Kitchen Caddy',
+            10 => 'Outside Food Waste Container',
+            45 => 'Wheeled Bin (Food)',
+        };
+
+        my %containers = (
+            535 => [ 1 ],
+            536 => [ 2 ],
+            537 => [ 12 ],
+            541 => [ 13 ],
+            542 => [ 9, 10 ],
+            544 => [ 45 ],
+        );
+        my %quantity_max = (
+            535 => 6,
+            536 => 4,
+            537 => 6,
+            541 => 4,
+            542 => 6,
+            544 => 4,
+        );
+
+        my $row = {
+            id => $_->{Id},
+            service_id => $_->{ServiceId},
+            service_name => $service_name_override{$_->{ServiceId}} || $_->{ServiceName},
+            request_allowed => $request_allowed{$_->{ServiceId}},
+            request_containers => $containers{$_->{ServiceId}},
+            request_max => $quantity_max{$_->{ServiceId}},
+            #$servicetask->{TaskTypeName} TaskTypeId Id
+            schedule => $servicetask->{ScheduleDescription},
+            last => $max_last,
+            last_ordinal => $last_ordinal,
+            next => $min_next,
+            next_ordinal => $next_ordinal,
+            next_changed => $next_changed,
+        };
+
+        push @out, $row;
+    }
+
+    return \@out;
+}
+
+1;

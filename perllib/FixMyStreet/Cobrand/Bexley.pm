@@ -54,7 +54,7 @@ sub open311_munge_update_params {
 
     $params->{service_request_id_ext} = $comment->problem->id;
 
-    my $contact = $comment->problem->category_row;
+    my $contact = $comment->problem->contact;
     $params->{service_code} = $contact->email;
 }
 
@@ -83,14 +83,17 @@ sub lookup_site_code_config {
 }
 
 sub open311_config {
-    my ($self, $row, $h, $params, $contact) = @_;
+    my ($self, $row, $h, $params) = @_;
 
     $params->{multi_photos} = 1;
+}
 
-    my $extra = $row->get_extra_fields;
+sub open311_extra_data {
+    my ($self, $row, $h, $extra, $contact) = @_;
 
+    my $open311_only;
     if ($contact->email =~ /^Confirm/) {
-        push @$extra,
+        push @$open311_only,
             { name => 'report_url', description => 'Report URL',
               value => $h->{url} },
             { name => 'title', description => 'Title',
@@ -123,7 +126,7 @@ sub open311_config {
         }
     }
 
-    $row->set_extra_fields(@$extra);
+    return $open311_only;
 }
 
 sub admin_user_domain { 'bexley.gov.uk' }
@@ -165,17 +168,27 @@ sub open311_post_send {
         $outofhours_email = 1;
     } elsif ($row->category eq 'Gulley covers' || $row->category eq 'Manhole covers') {
         my $reportType = $row->get_extra_field_value('reportType') || '';
-        $p1_email = 1 if $reportType eq 'Cover missing';
-        $p1_email = 1 if $dangerous eq 'Yes';
+        if ($reportType eq 'Cover missing' || $dangerous eq 'Yes') {
+            $p1_email = 1;
+            $outofhours_email = 1;
+        }
+    } elsif ($row->category eq 'Street cleaning and litter') {
+        my $reportType = $row->get_extra_field_value('reportType') || '';
+        if ($reportType eq 'Oil spillage' || $dangerous eq 'Yes') {
+            $p1_email = 1;
+            $outofhours_email = 1;
+        }
     } elsif ($row->category eq 'Damage to kerb' || $row->category eq 'Damaged road' || $row->category eq 'Damaged pavement') {
         $p1_email = 1;
+        $outofhours_email = 1;
     } elsif (!$lighting{$row->category}) {
         $p1_email = 1 if $dangerous eq 'Yes';
         $outofhours_email = 1 if $dangerous eq 'Yes';
     }
 
     my @to;
-    push @to, email_list($emails->{p1}, 'Bexley P1 email') if $p1_email;
+    my $p1_email_to_use = ($contact->email =~ /^Confirm/) ? $emails->{p1confirm} : $emails->{p1};
+    push @to, email_list($p1_email_to_use, 'Bexley P1 email') if $p1_email;
     push @to, email_list($emails->{lighting}, 'FixMyStreet Bexley Street Lighting') if $lighting{$row->category};
     push @to, email_list($emails->{flooding}, 'FixMyStreet Bexley Flooding') if $flooding{$row->category};
     push @to, email_list($emails->{outofhours}, 'Bexley out of hours') if $outofhours_email && _is_out_of_hours();
@@ -201,33 +214,6 @@ sub email_list {
     my @emails = split /,/, $emails;
     my @to = map { [ $_, $name ] } @emails;
     return @to;
-}
-
-sub dashboard_export_problems_add_columns {
-    my $self = shift;
-    my $c = $self->{c};
-
-    my %groups;
-    if ($c->stash->{body}) {
-        %groups = FixMyStreet::DB->resultset('Contact')->active->search({
-            body_id => $c->stash->{body}->id,
-        })->group_lookup;
-    }
-
-    splice @{$c->stash->{csv}->{headers}}, 5, 0, 'Subcategory';
-    splice @{$c->stash->{csv}->{columns}}, 5, 0, 'subcategory';
-
-    $c->stash->{csv}->{extra_data} = sub {
-        my $report = shift;
-
-        if ($groups{$report->category}) {
-            return {
-                category => $groups{$report->category},
-                subcategory => $report->category,
-            };
-        }
-        return {};
-    };
 }
 
 sub _is_out_of_hours {

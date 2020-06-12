@@ -35,7 +35,7 @@ $bromley->body_areas->create({
 } );
 
 my $bucks = FixMyStreet::DB->resultset('Body')->create({
-    name => 'Buckinghamshire County Council',
+    name => 'Buckinghamshire Council',
 });
 $bucks->body_areas->create({
     area_id => 2217
@@ -175,33 +175,53 @@ subtest "set multiple groups with groups element" => sub {
     is_deeply $contact->get_extra->{group}, ['sanitation & cleaning','street'], "groups set correctly";
 };
 
-subtest 'check non open311 contacts marked as deleted' => sub {
-    FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
+$body->update({ can_be_devolved => 1 });
+for my $test (
+    {
+        test => 'check non open311 contacts marked as deleted',
+        contact_params => {
+            email => 'contact@example.com',
+        },
+        deleted => 1,
+    },
+    {
+        test => 'check devolved non open311 contacts not marked as deleted',
+        contact_params => {
+            email => 'contact',
+            send_method => 'Open311',
+        },
+        deleted => 0,
+    },
+) {
+    subtest $test->{test} => sub {
+        FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
 
-    my $contact = FixMyStreet::DB->resultset('Contact')->create(
-        {
-            body_id => $body->id,
-            email =>   'contact@example.com',
-            category => 'An old category',
-            state => 'confirmed',
-            editor => $0,
-            whenedited => \'current_timestamp',
-            note => 'test contact',
-        }
-    );
+        my $contact = FixMyStreet::DB->resultset('Contact')->create(
+            {
+                body_id => $body->id,
+                category => 'An old category',
+                state => 'confirmed',
+                editor => $0,
+                whenedited => \'current_timestamp',
+                note => 'test contact',
+                %{$test->{contact_params}},
+            }
+        );
 
-    my $service_list = get_xml_simple_object( get_standard_xml() );
+        my $service_list = get_xml_simple_object( get_standard_xml() );
 
-    my $processor = Open311::PopulateServiceList->new();
-    $processor->_current_body( $body );
-    $processor->process_services( $service_list );
+        my $processor = Open311::PopulateServiceList->new();
+        $processor->_current_body( $body );
+        $processor->process_services( $service_list );
 
-    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
-    is $contact_count, 4, 'correct number of contacts';
+        my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+        is $contact_count, 4, 'correct number of contacts';
 
-    $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id, state => 'deleted' } )->count();
-    is $contact_count, 1, 'correct number of deleted contacts';
-};
+        $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id, state => 'deleted' } )->count();
+        is $contact_count, $test->{deleted}, 'correct number of deleted contacts';
+    };
+}
+$body->update({ can_be_devolved => 0 });
 
 subtest 'check email changed if matching category' => sub {
     FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->delete();
@@ -348,6 +368,52 @@ subtest 'check new category marked non_public' => sub {
     is $contact->category, 'Cans left out 24x7', 'category correct';
     is $contact->non_public, 1, 'contact marked as non_public';
 };
+
+subtest 'check protected categories do not have name/group overwritten' => sub {
+    my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;
+    $contact->set_extra_metadata('open311_protect', 1);
+    $contact->set_extra_metadata('group', [ 'sanitation' ]);
+    $contact->non_public(0);
+    $contact->update;
+
+    my $services_xml = '<?xml version="1.0" encoding="utf-8"?>
+    <services>
+      <service>
+        <service_code>100</service_code>
+        <service_name>Cans left out constantly</service_name>
+        <description>Garbage or recycling cans that have been left out for more than 24 hours after collection. Violators will be cited.</description>
+        <metadata>false</metadata>
+        <type>realtime</type>
+        <keywords>private</keywords>
+        <group>cleansing</group>
+      </service>
+    </services>
+        ';
+
+    my $service_list = get_xml_simple_object( $services_xml );
+
+    FixMyStreet::override_config {
+        ALLOWED_COBRANDS => [ 'tester' ],
+        COBRAND_FEATURES => {
+           category_groups => { tester => 1 },
+        }
+    }, sub {
+        my $processor = Open311::PopulateServiceList->new();
+        $processor->_current_body( $body );
+        $processor->process_services( $service_list );
+    };
+
+    my $contact_count = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->count();
+    is $contact_count, 1, 'correct number of contacts';
+
+    $contact->discard_changes;
+    is $contact->email, '100', 'email correct';
+    is $contact->category, 'Cans left out 24x7', 'category unchanged';
+    is_deeply $contact->groups, ['sanitation'], 'group unchanged';
+    # test that something did change
+    is $contact->non_public, 1, 'contact marked as non_public';
+};
+
 
 subtest 'check existing category marked non_public' => sub {
     my $contact = FixMyStreet::DB->resultset('Contact')->search( { body_id => $body->id } )->first;

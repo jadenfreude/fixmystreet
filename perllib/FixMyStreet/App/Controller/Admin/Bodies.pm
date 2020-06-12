@@ -127,6 +127,8 @@ sub edit : Chained('body') : PathPart('') : Args(0) {
     # to display email addresses as text
     $c->stash->{template} = 'admin/bodies/body.html';
     $c->forward('/admin/fetch_contacts');
+    $c->stash->{contacts} = [ $c->stash->{contacts}->all ];
+    $c->forward('/report/stash_category_groups', [ $c->stash->{contacts}, 0 ]);
 
     return 1;
 }
@@ -239,16 +241,21 @@ sub update_contact : Private {
     if ($current_contact && $contact->id && $contact->id != $current_contact->id) {
         $errors{category} = _('You cannot rename a category to an existing category');
     } elsif ($current_contact && !$contact->id) {
-        # Changed name
         $contact = $current_contact;
-        $c->model('DB::Problem')->to_body($c->stash->{body_id})->search({ category => $current_category })->update({ category => $category });
-        $contact->category($category);
+        # Set the flag here so we can run the editable test on it
+        $contact->set_extra_metadata(open311_protect => $c->get_param('open311_protect'));
+        if (!$contact->category_uneditable) {
+            # Changed name
+            $c->model('DB::Problem')->to_body($c->stash->{body_id})->search({ category => $current_category })->update({ category => $category });
+            $contact->category($category);
+        }
     }
 
     my $email = $c->get_param('email');
     $email =~ s/\s+//g;
     my $send_method = $c->get_param('send_method') || $contact->body->send_method || "";
-    unless ( $send_method eq 'Open311' ) {
+    my $email_unchanged = $contact->email && $email && $contact->email eq $email;
+    unless ( $send_method eq 'Open311' || $email_unchanged ) {
         $errors{email} = _('Please enter a valid email') unless is_valid_email_list($email) || $email eq 'REFUSED';
     }
 
@@ -264,10 +271,12 @@ sub update_contact : Private {
     $contact->send_method( $c->get_param('send_method') );
 
     # Set flags in extra to the appropriate values
-    if ( $c->get_param('photo_required') ) {
-        $contact->set_extra_metadata_if_undefined(  photo_required => 1 );
-    } else {
-        $contact->unset_extra_metadata( 'photo_required' );
+    foreach (qw(photo_required open311_protect updates_disallowed reopening_disallowed assigned_users_only anonymous_allowed)) {
+        if ( $c->get_param($_) ) {
+            $contact->set_extra_metadata( $_ => 1 );
+        } else {
+            $contact->unset_extra_metadata($_);
+        }
     }
     if ( my @group = $c->get_param_list('group') ) {
         @group = grep { $_ } @group;

@@ -7,7 +7,6 @@ BEGIN { extends 'Catalyst::Controller'; }
 use JSON::MaybeXS;
 use DateTime;
 use DateTime::Format::ISO8601;
-use List::MoreUtils 'uniq';
 use FixMyStreet::DateRange;
 
 =head1 NAME
@@ -102,6 +101,7 @@ sub problems : Local {
     } );
 
     foreach my $problem (@problems) {
+        $c->cobrand->call_hook(munge_problem_list => $problem);
         $problem->name( '' ) if $problem->anonymous == 1;
         $problem->service( 'Web interface' ) if $problem->service eq '';
         my $body_names = $problem->body_names;

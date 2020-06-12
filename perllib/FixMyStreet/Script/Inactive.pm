@@ -158,8 +158,14 @@ sub delete_reports {
 sub anonymize_users {
     my $self = shift;
 
+    my $body_users = FixMyStreet::DB->resultset("Body")->search({
+        comment_user_id => { '!=' => undef },
+    }, {
+        columns => 'comment_user_id',
+    });
     my $users = FixMyStreet::DB->resultset("User")->search({
         last_active => { '<', interval($self->anonymize) },
+        id => { -not_in => $body_users->as_query },
         email => { -not_like => 'removed-%@' . FixMyStreet->config('EMAIL_DOMAIN') },
     });
 
@@ -191,7 +197,7 @@ sub email_inactive_users {
                 user => $user,
                 url => $self->base_cobrand->base_url_with_lang . '/my',
             },
-            { To => [ $user->email, $user->name ] },
+            { To => [ [ $user->email, $user->name ] ] },
             undef, 0, $self->base_cobrand,
         );
 

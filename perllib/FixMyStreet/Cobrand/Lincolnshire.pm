@@ -57,7 +57,7 @@ sub categories_restriction {
     # Lincolnshire is a two-tier council, but don't want to display
     # all district-level categories on their cobrand - just a couple.
     return $rs->search( { -or => [
-        'body.name' => "Lincolnshire County Council",
+        'body.name' => [ "Lincolnshire County Council", 'Highways England' ],
 
         # District categories:
         'me.category' => { -in => [
@@ -76,5 +76,12 @@ sub pin_colour {
     return 'grey' if $p->state eq 'not responsible' || !$self->owns_problem( $p );
     return 'yellow';
 }
+
+around 'open311_config' => sub {
+    my ($orig, $self, $row, $h, $params) = @_;
+
+    $params->{upload_files} = 1;
+    $self->$orig($row, $h, $params);
+};
 
 1;

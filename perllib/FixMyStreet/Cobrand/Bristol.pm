@@ -51,6 +51,7 @@ sub categories_restriction {
     # cobrand, not the email categories from FMS.com. We've set up the
     # Email categories with a devolved send_method, so can identify Open311
     # categories as those which have a blank send_method.
+    # Also Highways England categories have a blank send_method.
     return $rs->search( { 'me.send_method' => undef } );
 }
 
@@ -63,10 +64,17 @@ sub open311_config {
 sub open311_contact_meta_override {
     my ($self, $service, $contact, $meta) = @_;
 
+    # Bristol returns groups we do not want to use
+    $service->{group} = [];
+
     my %server_set = (easting => 1, northing => 1);
+    my %hidden_field = (usrn => 1, asset_id => 1);
     foreach (@$meta) {
         $_->{automated} = 'server_set' if $server_set{$_->{code}};
+        $_->{automated} = 'hidden_field' if $hidden_field{$_->{code}};
     }
 }
+
+sub admin_user_domain { 'bristol.gov.uk' }
 
 1;

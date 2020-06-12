@@ -113,9 +113,11 @@ sub category_display {
     $self->get_extra_metadata('display_name') || $self->translate_column('category');
 }
 
+# Returns an arrayref of groups this Contact is in; if it is
+# not in any group, returns an arrayref of the empty string.
 sub groups {
     my $self = shift;
-    my $groups = $self->get_extra_metadata('group') || [];
+    my $groups = $self->get_extra_metadata('group') || [''];
     $groups = [ $groups ] unless ref $groups eq 'ARRAY';
     return $groups;
 }
@@ -173,6 +175,27 @@ sub disable_form_field {
     my $metadata = $self->get_all_metadata;
     my ($field) = grep { $_->{code} eq '_fms_disable_' } @$metadata;
     return $field;
+}
+
+sub sent_by_open311 {
+    my $self = shift;
+    my $body = $self->body;
+    return 1 if
+        (!$body->can_be_devolved && $body->send_method eq 'Open311')
+        || ($body->can_be_devolved && $body->send_method eq 'Open311' && !$self->send_method)
+        || ($body->can_be_devolved && $self->send_method eq 'Open311');
+    return 0;
+}
+
+# We do not want to allow editing of a category's name
+# if it's Open311, unless it's marked as protected
+sub category_uneditable {
+    my $self = shift;
+    return 1 if
+        $self->in_storage
+        && !$self->get_extra_metadata('open311_protect')
+        && $self->sent_by_open311;
+    return 0;
 }
 
 1;

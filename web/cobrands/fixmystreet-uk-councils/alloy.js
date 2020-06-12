@@ -3,6 +3,7 @@
 OpenLayers.Protocol.Alloy = OpenLayers.Class(OpenLayers.Protocol.HTTP, {
     currentRequests: [],
 
+    tileSize: 512,
     abort: function() {
         if (this.currentRequests.length) {
             for (var j = 0; j < this.currentRequests.length; j++) {
@@ -55,14 +56,16 @@ OpenLayers.Protocol.Alloy = OpenLayers.Class(OpenLayers.Protocol.HTTP, {
 
     getTileCoord: function(bounds, maxExtent, map, reverse) {
         var origin = new OpenLayers.LonLat(maxExtent.left, maxExtent.top);
-        var resolution = map.getResolutionForZoom(3);
+        // hard code this number as we want to avoid fetching asset groups
+        // which happens at more zoomed out levels
+        var resolution = 2.388657133579254;
 
         var adjustX = reverse ? 0.5 : 0;
         var adjustY = reverse ? 0 : 0.5;
         var xFromOrigin = Math.floor((bounds[0] - origin.lon) / resolution + adjustX);
         var yFromOrigin = Math.floor((bounds[1] - origin.lat) / resolution + adjustY);
-        var tileCoordX = Math.floor(xFromOrigin / 512);
-        var tileCoordY = Math.floor(yFromOrigin / 512) * -1;
+        var tileCoordX = Math.floor(xFromOrigin / this.tileSize);
+        var tileCoordY = Math.floor(yFromOrigin / this.tileSize) * -1;
 
         if (reverse) {
             tileCoordX -= 1;
@@ -86,13 +89,18 @@ OpenLayers.Strategy.Alloy = OpenLayers.Class(OpenLayers.Strategy.FixMyStreet, {
       this.failCount = 0;
       this.layer.destroyFeatures();
     },
+    // allow sub classes to override the remote projection for converting the geometry
+    // of the features
+    getRemoteProjection: function() {
+        return this.layer.projection;
+    },
     merge: function(resp) {
         this.count++;
         // This if/else clause lifted from OpenLayers.Strategy.BBOX
         if (resp.success()) {
             var features = resp.features;
             if(features && features.length > 0) {
-                var remote = this.layer.projection;
+                var remote = this.getRemoteProjection();
                 var local = this.layer.map.getProjectionObject();
                 if(!local.equals(remote)) {
                     var geom;
@@ -122,13 +130,96 @@ OpenLayers.Strategy.Alloy = OpenLayers.Class(OpenLayers.Strategy.FixMyStreet, {
 
 });
 
-fixmystreet.assets.alloy_defaults = {
+fixmystreet.alloy_defaults = {
     http_options: {
       base: "https://alloy-api-tile01.yotta.co.uk/api/render-layer/tile/${layerid}/${environment}/${layerVersion}/${z}/${x}/${y}",
     },
     format_class: OpenLayers.Format.GeoJSON,
     srsName: "EPSG:3857",
     strategy_class: OpenLayers.Strategy.Alloy
+};
+
+/* for Alloy V2 */
+OpenLayers.Format.AlloyV2 = OpenLayers.Class(OpenLayers.Format.GeoJSON, {
+    read: function(json, type, filter) {
+        var results = null;
+        var obj = null;
+        if (typeof json == "string") {
+            obj = OpenLayers.Format.JSON.prototype.read.apply(this, [json, filter]);
+        } else {
+            obj = json;
+        }
+
+        if(!obj) {
+            OpenLayers.Console.error("Bad JSON: " + json);
+        } else {
+            results = [];
+            for(var i=0, len=obj.results.length; i<len; ++i) {
+                try {
+                    results.push(this.parseFeature(obj.results[i]));
+                } catch(err) {
+                    results = null;
+                    OpenLayers.Console.error(err);
+                }
+            }
+        }
+        return results;
+    }
+});
+
+OpenLayers.Protocol.AlloyV2 = OpenLayers.Class(OpenLayers.Protocol.Alloy, {
+    tileSize: 128,
+    getURL: function(coords, options) {
+        return OpenLayers.String.format(options.base, {'layerid': options.layerid, 'styleid': options.styleid, 'z': 17, 'x': coords[0], 'y': coords[1]});
+    }
+});
+
+OpenLayers.Strategy.AlloyV2 = OpenLayers.Class(OpenLayers.Strategy.Alloy, {
+    initialize: function(name, options) {
+        this.remote = new OpenLayers.Projection("EPSG:4326");
+        OpenLayers.Strategy.Alloy.prototype.initialize.apply(this, arguments);
+    },
+    // the layer uses EPSG:3857 for generating the tile location but the features
+    // use EPSG:4326
+    getRemoteProjection: function() {
+        return this.remote;
+    }
+});
+
+fixmystreet.alloyv2_defaults = {
+    format_class: OpenLayers.Format.AlloyV2,
+    srsName: "EPSG:3857",
+    strategy_class: OpenLayers.Strategy.AlloyV2
+};
+
+fixmystreet.alloy_add_layers = function(defaults, layers) {
+    $.each(layers, function(index, layer) {
+        if ( layer.categories ) {
+            var options = {
+              http_options: {
+                layerid: layer.layerid || layer.layer
+              },
+              asset_type: layer.asset_type || "spot",
+              asset_category: layer.categories,
+              asset_item: layer.item_name || layer.layer_name.toLowerCase()
+            };
+            // Alloy v2
+            if (layer.styleid) {
+                options.http_options.styleid = layer.styleid;
+            }
+            // Alloy v1
+            if (layer.version) {
+                options.http_options.layerVersion = layer.version;
+            }
+            if (layer.max_resolution) {
+              options.max_resolution = layer.max_resolution;
+            }
+            if (layer.snap_threshold || layer.snap_threshold === 0) {
+              options.snap_threshold = layer.snap_threshold;
+            }
+            fixmystreet.assets.add(defaults, options);
+        }
+    });
 };
 
 })();

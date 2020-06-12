@@ -106,23 +106,37 @@ sub process_user : Private {
     # Update form includes two username fields: #form_username_register and #form_username_sign_in
     $params{username} = (first { $_ } $c->get_param_list('username')) || '';
 
+    my $anon_button = $c->cobrand->allow_anonymous_reports eq 'button' && $c->get_param('report_anonymously');
+    if ($anon_button) {
+        my $anon_details = $c->cobrand->anonymous_account;
+        my $user = $c->model('DB::User')->find_or_new({ email => $anon_details->{email} });
+        $user->name($anon_details->{name});
+        $update->user($user);
+        $update->name($user->name);
+        $c->stash->{contributing_as_anonymous_user} = 1;
+        return 1;
+    }
+
     # Extra block to use 'last'
     if ( $c->user_exists ) { {
         my $user = $c->user->obj;
 
-        if ($c->stash->{contributing_as_another_user} = $user->contributing_as('another_user', $c, $update->problem->bodies_str_ids)) {
+        if ($c->stash->{contributing_as_another_user} = $user->contributing_as('another_user', $c, $c->stash->{problem}->bodies_str_ids)) {
             # Act as if not logged in (and it will be auto-confirmed later on)
             last;
         }
 
         $user->name( Utils::trim_text( $params{name} ) ) if $params{name};
+        $update->name($user->name);
         my $title = Utils::trim_text( $params{fms_extra_title} );
         $user->title( $title ) if $title;
         $update->user( $user );
 
         # Just in case, make sure the user will have a name
         if ($c->stash->{contributing_as_body} or $c->stash->{contributing_as_anonymous_user}) {
-            $user->name($user->from_body->name) unless $user->name;
+            my $name = $user->moderating_user_name;
+            $update->name($name);
+            $user->name($name) unless $user->name;
         }
 
         return 1;
@@ -156,6 +170,7 @@ sub process_user : Private {
 
     $update->user->name( Utils::trim_text( $params{name} ) )
         if $params{name};
+    $update->name($update->user->name);
     $update->user->title( Utils::trim_text( $params{fms_extra_title} ) )
         if $params{fms_extra_title};
 
@@ -233,7 +248,7 @@ sub load_problem : Private {
     # Problem ID could come from existing update in token, or from query parameter
     my $problem_id = $update->problem_id || $c->get_param('id');
     $c->forward( '/report/load_problem_or_display_error', [ $problem_id ] );
-    $update->problem($c->stash->{problem});
+    $update->problem_id($c->stash->{problem}->id);
 }
 
 =head2 check_form_submitted
@@ -267,7 +282,8 @@ sub process_update : Private {
 
     my $name = Utils::trim_text( $params{name} );
 
-    $params{reopen} = 0 unless $c->user && $c->user->id == $c->stash->{problem}->user->id;
+    my $problem = $c->stash->{problem};
+    $params{reopen} = 0 unless $c->user && $c->user->id == $problem->user->id;
 
     my $update = $c->stash->{update};
     $update->text($params{update});
@@ -275,16 +291,23 @@ sub process_update : Private {
     $update->mark_fixed($params{fixed} ? 1 : 0);
     $update->mark_open($params{reopen} ? 1 : 0);
 
-    $c->stash->{contributing_as_body} = $c->user_exists && $c->user->contributing_as('body', $c, $update->problem->bodies_str_ids);
-    $c->stash->{contributing_as_anonymous_user} = $c->user_exists && $c->user->contributing_as('anonymous_user', $c, $update->problem->bodies_str_ids);
+    $c->stash->{contributing_as_body} = $c->user_exists && $c->user->contributing_as('body', $c, $problem->bodies_str_ids);
+    $c->stash->{contributing_as_anonymous_user} = $c->user_exists && $c->user->contributing_as('anonymous_user', $c, $problem->bodies_str_ids);
+
+    # This is also done in process_user, but is needed here for anonymous() just below
+    my $anon_button = $c->cobrand->allow_anonymous_reports($problem->category) eq 'button' && $c->get_param('report_anonymously');
+    if ($anon_button) {
+        $c->stash->{contributing_as_anonymous_user} = 1;
+        $c->stash->{contributing_as_body} = undef;
+        $c->stash->{contributing_as_another_user} = undef;
+    }
+
+
     if ($c->stash->{contributing_as_body}) {
-        $update->name($c->user->from_body->name);
         $update->anonymous(0);
     } elsif ($c->stash->{contributing_as_anonymous_user}) {
-        $update->name($c->user->from_body->name);
         $update->anonymous(1);
     } else {
-        $update->name($name);
         $update->anonymous($c->get_param('may_show_name') ? 0 : 1);
     }
 
@@ -301,7 +324,6 @@ sub process_update : Private {
         # then we are not changing the state of the problem so can use the current
         # problem state
         } else {
-            my $problem = $c->stash->{problem} || $update->problem;
             $update->problem_state( $problem->state );
         }
     }
@@ -310,7 +332,7 @@ sub process_update : Private {
     my @extra; # Next function fills this, but we don't need it here.
     # This is just so that the error checking for these extra fields runs.
     # TODO Use extra here as it is used on reports.
-    my $body = (values %{$update->problem->bodies})[0];
+    my $body = (values %{$problem->bodies})[0];
     $c->cobrand->process_open311_extras( $c, $body, \@extra );
 
     if ( $c->get_param('fms_extra_title') ) {
@@ -394,6 +416,13 @@ sub check_for_errors : Private {
     #push @{ $c->stash->{errors} },
     #  _('There were problems with your update. Please see below.');
 
+    if ( $c->cobrand->allow_anonymous_reports ) {
+        my $anon_details = $c->cobrand->anonymous_account;
+        my $update = $c->stash->{update};
+        $update->user->email(undef) if $update->user->email eq $anon_details->{email};
+        $update->name(undef) if $update->name && $update->name eq $anon_details->{name};
+    }
+
     return;
 }
 
@@ -455,6 +484,13 @@ sub save_update : Private {
         $update->confirm();
     } elsif ($c->stash->{contributing_as_anonymous_user}) {
         $update->set_extra_metadata( contributed_as => 'anonymous_user' );
+        if ( $c->user_exists && $c->user->from_body ) {
+            # If a staff user has clicked the 'report anonymously' button then
+            # there would be no record of who that staff member was as we've
+            # used the cobrand's anonymous_account for the report. In this case
+            # record the staff user ID in the report metadata.
+            $update->set_extra_metadata( contributed_by => $c->user->id );
+        }
         $update->confirm();
     } elsif ( !$update->user->in_storage ) {
         # User does not exist.

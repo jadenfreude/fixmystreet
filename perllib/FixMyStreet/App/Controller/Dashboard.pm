@@ -109,6 +109,7 @@ sub index : Path : Args(0) {
 
         $c->forward('/admin/fetch_contacts');
         $c->stash->{contacts} = [ $c->stash->{contacts}->all ];
+        $c->forward('/report/stash_category_groups', [ $c->stash->{contacts}, 0 ]);
 
         # See if we've had anything from the body dropdowns
         $c->stash->{category} = $c->get_param('category');
@@ -151,13 +152,13 @@ sub index : Path : Args(0) {
 sub construct_rs_filter : Private {
     my ($self, $c, $updates) = @_;
 
+    my $table_name = $updates ? 'problem' : 'me';
+
     my %where;
     $where{areas} = [ map { { 'like', "%,$_,%" } } @{$c->stash->{ward}} ]
         if @{$c->stash->{ward}};
-    $where{category} = $c->stash->{category}
+    $where{"$table_name.category"} = $c->stash->{category}
         if $c->stash->{category};
-
-    my $table_name = $updates ? 'problem' : 'me';
 
     my $state = $c->stash->{q_state};
     if ( FixMyStreet::DB::Result::Problem->fixed_states->{$state} ) { # Probably fixed - council
@@ -327,6 +328,7 @@ sub export_as_csv_updates : Private {
         objects => $c->stash->{objects_rs}->search_rs({}, {
             order_by => ['me.confirmed', 'me.id'],
             '+columns' => ['problem.bodies_str'],
+            cursor_page_size => 1000,
         }),
         headers => [
             'Report ID', 'Update ID', 'Date', 'Status', 'Problem state',
@@ -345,10 +347,20 @@ sub export_as_csv_updates : Private {
 sub export_as_csv : Private {
     my ($self, $c) = @_;
 
+    my $groups = $c->cobrand->enable_category_groups ? 1 : 0;
+    my $join = ['comments'];
+    my $columns = ['comments.id', 'comments.problem_state', 'comments.state', 'comments.confirmed', 'comments.mark_fixed'];
+    if ($groups) {
+        push @$join, 'contact';
+        push @$columns, 'contact.id', 'contact.extra';
+    }
     my $csv = $c->stash->{csv} = {
         objects => $c->stash->{objects_rs}->search_rs({}, {
-            prefetch => 'comments',
+            join => $join,
+            collapse => 1,
+            '+columns' => $columns,
             order_by => ['me.confirmed', 'me.id'],
+            cursor_page_size => 1000,
         }),
         headers => [
             'Report ID',
@@ -356,6 +368,7 @@ sub export_as_csv : Private {
             'Detail',
             'User Name',
             'Category',
+            $groups ? ('Subcategory') : (),
             'Created',
             'Confirmed',
             'Acknowledged',
@@ -377,6 +390,7 @@ sub export_as_csv : Private {
             'detail',
             'user_name_display',
             'category',
+            $groups ? ('subcategory') : (),
             'created',
             'confirmed',
             'acknowledged',
@@ -477,6 +491,16 @@ sub generate_csv : Private {
             ($hashref->{local_coords_x}, $hashref->{local_coords_y}) =
                 $obj->local_coords;
         }
+
+        if ($asked_for{subcategory}) {
+            my $group = $obj->contact && $obj->contact->groups;
+            $group = join(',', @$group);
+            if ($group) {
+                $hashref->{subcategory} = $obj->category;
+                $hashref->{category} = $group;
+            }
+        }
+
         if ($obj->can('url')) {
             my $base = $c->cobrand->base_url_for_report($obj->can('problem') ? $obj->problem : $obj);
             $hashref->{url} = join '', $base, $obj->url;
@@ -540,20 +564,23 @@ sub heatmap : Local : Args(0) {
     $c->stash->{children} = $children;
     $c->stash->{ward_hash} = { map { $_->{id} => 1 } @{$c->stash->{wards}} } if $c->stash->{wards};
 
-    $c->forward('/reports/setup_categories_and_map');
+    $c->forward('/reports/setup_categories');
+    $c->forward('/reports/setup_map');
 }
 
 sub heatmap_filters :Private {
     my ($self, $c, $where) = @_;
 
     # Wards
-    my @areas = @{$c->user->area_ids || []};
-    # Want to get everything if nothing given in an ajax call
-    if (!$c->stash->{wards} && @areas) {
-        $c->stash->{wards} = [ map { { id => $_ } } @areas ];
-        $where->{areas} = [
-            map { { 'like', '%,' . $_ . ',%' } } @areas
-        ];
+    if ($c->user_exists) {
+        my @areas = @{$c->user->area_ids || []};
+        # Want to get everything if nothing given in an ajax call
+        if (!$c->stash->{wards} && @areas) {
+            $c->stash->{wards} = [ map { { id => $_ } } @areas ];
+            $where->{areas} = [
+                map { { 'like', '%,' . $_ . ',%' } } @areas
+            ];
+        }
     }
 
     # Date range
@@ -585,11 +612,24 @@ sub heatmap_sidebar :Private {
         order_by => 'lastupdate',
     })->all ];
 
-    my $params = { map { my $n = $_; s/me\./problem\./; $_ => $where->{$n} } keys %$where };
+    my $params = { map {
+        my $v = $where->{$_};
+        if (ref $v eq 'HASH') {
+            $v = { map { my $vv = $v->{$_}; s/me\./problem\./; $_ => $vv } keys %$v };
+        } else {
+            s/me\./problem\./;
+        }
+        $_ => $v;
+    } keys %$where };
     my $body = $c->stash->{body};
+
+    my @user;
+    push @user, $c->user->id if $c->user_exists;
+    push @user, $body->comment_user_id if $body->comment_user_id;
+    $params->{'me.user_id'} = { -not_in => \@user } if @user;
+
     my @c = $c->model('DB::Comment')->to_body($body)->search({
         %$params,
-        'me.user_id' => { -not_in => [ $c->user->id, $body->comment_user_id || () ] },
         'me.state' => 'confirmed',
     }, {
         columns => 'problem_id',
