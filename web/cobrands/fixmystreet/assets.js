@@ -179,6 +179,18 @@ OpenLayers.Layer.VectorAsset = OpenLayers.Class(OpenLayers.Layer.Vector, {
         return (f1.attributes[asset_id_field] == f2.attributes[asset_id_field]);
     },
 
+    construct_selected_asset_message: function(asset) {
+        var id = asset.attributes[this.fixmystreet.feature_code] || '';
+        if (id === '') {
+            return;
+        }
+        var data = { id: id, name: this.fixmystreet.asset_item };
+        if (this.fixmystreet.construct_asset_name) {
+            data = this.fixmystreet.construct_asset_name(id) || data;
+        }
+        return 'You have selected ' + data.name + ' <b>' + data.id + '</b>';
+    },
+
     find_matching_feature: function(feature, layer) {
         if (!layer) {
             return false;
@@ -402,12 +414,13 @@ function check_zoom_message_visibility() {
     if (this.fixmystreet.non_interactive && !this.fixmystreet.display_zoom_message) {
         return;
     }
-    var select = this.fixmystreet.asset_group ? 'category_group' : 'form_category';
-    var category = $("select#" + select).val() || '',
-        prefix = category.replace(/[^a-z]/gi, ''),
-        id = "category_meta_message_" + prefix,
-        $p = $('#' + id);
     if (this.relevant()) {
+        var select = this.fixmystreet.asset_group ? 'category_group' : 'form_category',
+            category = $("select#" + select).val() || '',
+            prefix = category.replace(/[^a-z]/gi, ''),
+            id = "category_meta_message_" + prefix,
+            $p = $('#' + id),
+            message;
         if ($p.length === 0) {
             $p = $("<p>").prop("id", id).prop('class', 'category_meta_message');
             if ($('html').hasClass('mobile')) {
@@ -419,27 +432,45 @@ function check_zoom_message_visibility() {
         }
 
         if (this.getVisibility() && this.inRange) {
-            if (typeof this.fixmystreet.asset_item_message !== 'undefined') {
-                $p.html(this.fixmystreet.asset_item_message);
-            } else {
-                $p.html('You can pick a <b class="asset-' + this.fixmystreet.asset_type + '">' + this.fixmystreet.asset_item + '</b> from the map &raquo;');
-            }
+            message = get_asset_pick_message.call(this);
         } else {
-            $p.html('Zoom in to pick a ' + this.fixmystreet.asset_item + ' from the map');
+            message = 'Zoom in to pick a ' + this.fixmystreet.asset_item + ' from the map';
         }
+        $p.html(message);
+    } else {
+        update_message_display.call(this, null);
+    }
+}
 
-    } else if (this.fixmystreet.asset_group) {
-        prefix = this.fixmystreet.asset_group.replace(/[^a-z]/gi, '');
-        id = "category_meta_message_" + prefix;
-        $p = $('#' + id);
-        $p.remove();
+function get_asset_pick_message() {
+    var message;
+    if (typeof this.fixmystreet.asset_item_message !== 'undefined') {
+        message = this.fixmystreet.asset_item_message;
+        message = message.replace('ITEM', this.fixmystreet.asset_item);
+    } else {
+        message = 'You can pick a <b class="asset-' + this.fixmystreet.asset_type + '">' + this.fixmystreet.asset_item + '</b> from the map &raquo;';
+    }
+    return message;
+}
+
+function update_message_display(message) {
+    if (this.fixmystreet.asset_group) {
+        _update_message(message, this.fixmystreet.asset_group);
     } else {
         $.each(this.fixmystreet.asset_category, function(i, c) {
-            var prefix = c.replace(/[^a-z]/gi, ''),
-                id = "category_meta_message_" + prefix,
-                $p = $('#' + id);
-            $p.remove();
+            _update_message(message, c);
         });
+    }
+}
+
+function _update_message(message, c) {
+    var prefix = c.replace(/[^a-z]/gi, ''),
+        id = "category_meta_message_" + prefix,
+        $p = $('#' + id);
+    if (message) {
+        $p.html(message);
+    } else {
+        $p.remove();
     }
 }
 
@@ -817,35 +848,16 @@ fixmystreet.assets = {
         return new OpenLayers.Style(f);
     },
     named_select_action_found: function(asset) {
-        var id = asset.attributes[this.fixmystreet.feature_code] || '';
-        if (id !== '') {
-            var data = { id: id, name: this.fixmystreet.asset_item };
-            if (this.fixmystreet.construct_asset_name) {
-                data = this.fixmystreet.construct_asset_name(id) || data;
-            }
-            $('.category_meta_message').html('You have selected ' + data.name + ' <b>' + data.id + '</b>');
-        } else {
-            var message = this.fixmystreet.asset_item_message;
-            message = message.replace('ITEM', this.fixmystreet.asset_item);
-            $('.category_meta_message').html(message);
+        var fn = this.fixmystreet.construct_selected_asset_message || this.construct_selected_asset_message;
+        var message = fn.call(this, asset);
+        if (!message) {
+            message = get_asset_pick_message.call(this);
         }
+        $('.category_meta_message').html(message);
     },
     named_select_action_not_found: function() {
-        var message = this.fixmystreet.asset_item_message;
-        message = message.replace('ITEM', this.fixmystreet.asset_item);
-        if (this.fixmystreet.asset_group) {
-            var prefix = this.fixmystreet.asset_group.replace(/[^a-z]/gi, '');
-            var id = "category_meta_message_" + prefix;
-            var $p = $('#' + id);
-            $p.html(message);
-        } else {
-            $.each(this.fixmystreet.asset_category, function(i, c) {
-                var prefix = c.replace(/[^a-z]/gi, ''),
-                    id = "category_meta_message_" + prefix,
-                    $p = $('#' + id);
-                $p.html(message);
-            });
-        }
+        var message = get_asset_pick_message.call(this);
+        update_message_display.call(this, message);
     },
 
     selectedFeature: function() {
