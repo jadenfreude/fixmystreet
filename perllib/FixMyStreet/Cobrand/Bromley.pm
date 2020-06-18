@@ -14,6 +14,7 @@ use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8);
 use FixMyStreet::DateRange;
 use FixMyStreet::WorkingDays;
+use Memcached;
 
 sub council_area_id { return 2482; }
 sub council_area { return 'Bromley'; }
@@ -402,6 +403,19 @@ sub munge_report_new_contacts {
     $self->SUPER::munge_report_new_contacts($categories);
 }
 
+sub updates_disallowed {
+    my $self = shift;
+    my ($problem) = @_;
+
+    # Only open waste reports
+    if (my $contact = $problem->contact) {
+        my $waste = grep { $_ eq 'Waste' } @{$problem->contact->groups};
+        return 1 if $waste && ($problem->is_fixed || $problem->is_closed);
+    }
+
+    return $self->next::method(@_);
+}
+
 sub bin_addresses_for_postcode {
     my $self = shift;
     my $pc = shift;
@@ -426,8 +440,17 @@ sub look_up_property {
     my $self = shift;
     my $uprn = shift;
 
-    my $echo = $self->feature('echo');
-    $echo = Integrations::Echo->new(%$echo);
+    my $cfg = $self->feature('echo');
+    my $echo = Integrations::Echo->new(%$cfg);
+
+    if ($cfg->{max_per_day}) {
+        my $today = DateTime->today->set_time_zone(FixMyStreet->local_time_zone)->ymd;
+        my $ip = $self->{c}->req->address;
+        my $key = FixMyStreet->test_mode ? "bromley-test" : "bromley-$ip-$today";
+        my $count = Memcached::increment($key, 86400) || 0;
+        $self->{c}->detach('/page_error_403_access_denied', []) if $count > $cfg->{max_per_day};
+    }
+
     my $result = $echo->GetPointAddress($uprn);
     return {
         address => $result->{Description},
@@ -503,7 +526,7 @@ sub bin_services_for_address {
     );
 
     my @out;
-    my $today = DateTime->today->set_time_zone(FixMyStreet->local_time_zone)->strftime("%F");
+    my $today = DateTime->now->set_time_zone(FixMyStreet->local_time_zone)->strftime("%F");
     foreach (@{$result->{ServiceUnit}}) {
         next unless $_->{ServiceTasks};
 
@@ -546,7 +569,9 @@ sub bin_services_for_address {
             request_allowed => $request_allowed{$_->{ServiceId}},
             request_containers => $containers{$_->{ServiceId}},
             request_max => $quantity_max{$_->{ServiceId}},
-            #$servicetask->{TaskTypeName} TaskTypeId Id
+            service_task_id => $servicetask->{Id},
+            service_task_name => $servicetask->{TaskTypeName},
+            service_task_type_id => $servicetask->{TaskTypeId},
             schedule => $servicetask->{ScheduleDescription},
             last => $max_last,
             last_ordinal => $last_ordinal,
@@ -559,6 +584,35 @@ sub bin_services_for_address {
     }
 
     return \@out;
+}
+
+sub bin_future_collections {
+    my $self = shift;
+
+    my $services = $self->{c}->stash->{service_data};
+    my @tasks;
+    my %names;
+    foreach (@$services) {
+        push @tasks, $_->{service_task_id};
+        $names{$_->{service_task_id}} = $_->{service_name};
+    }
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->GetServiceTaskInstances(@tasks);
+    return [] unless $result;
+
+    my $events = [];
+    foreach (@{$result->{ServiceTaskInstances} || []}) {
+        my $task_id = $_->{ServiceTaskRef}{Value}{anyType};
+        foreach (@{$_->{Instances}{ScheduledTaskInfo}}) {
+            my $dt = construct_bin_date($_->{CurrentScheduledDate});
+            my $summary = $names{$task_id} . ' collection';
+            my $desc = '';
+            push @$events, { date => $dt, summary => $summary, desc => $desc };
+        }
+    }
+    return $events;
 }
 
 =over
@@ -576,7 +630,7 @@ sub report_allowed {
     my $dt = shift;
     my $wd = FixMyStreet::WorkingDays->new(public_holidays => FixMyStreet::Cobrand::UK::public_holidays());
     $dt = $wd->add_days($dt, 2)->ymd;
-    my $today = DateTime->today->set_time_zone(FixMyStreet->local_time_zone)->ymd;
+    my $today = DateTime->now->set_time_zone(FixMyStreet->local_time_zone)->ymd;
     return $today le $dt;
 }
 

@@ -97,8 +97,11 @@ FixMyStreet::override_config {
         is $res->code, 403;
         $mech->log_in_ok($user->email);
         $mech->get_ok('/report/' . $report->id);
+        $mech->content_contains('Provide an update');
+        $report->update({ state => 'fixed - council' });
         $mech->log_in_ok($staff_user->email);
         $mech->get_ok('/report/' . $report->id);
+        $mech->content_lacks('Provide an update');
 
         $mech->host('www.fixmystreet.com');
         $res = $mech->get('/report/' . $report->id);
@@ -136,6 +139,18 @@ FixMyStreet::override_config {
         is $mech->uri->path, '/hercules/uprn/1000000002';
         $mech->get_ok('/hercules/uprn/1000000002/enquiry?service=1');
         is $mech->uri->path, '/hercules/uprn/1000000002';
+    };
+    subtest 'Checking calendar' => sub {
+        $mech->follow_link_ok({ text => 'Add to your calendar (.ics file)' });
+        $mech->content_contains('BEGIN:VCALENDAR');
+        my @events = split /BEGIN:VEVENT/, $mech->encoded_content;
+        shift @events; # Header
+        my $i = 0;
+        foreach (@events) {
+            $i++ if /DTSTART;VALUE=DATE:20200701/ && /SUMMARY:Refuse collection/;
+            $i++ if /DTSTART;VALUE=DATE:20200708/ && /SUMMARY:Paper recycling collection/;
+        }
+        is $i, 2, 'Two events from the sample data in the calendar';
     };
     subtest 'General enquiry, on behalf of someone else' => sub {
         $mech->log_in_ok($staff_user->email);
