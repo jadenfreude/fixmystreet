@@ -1,8 +1,15 @@
+use utf8;
 use Test::MockModule;
+use Test::MockTime qw(:all);
 use FixMyStreet::TestMech;
+use FixMyStreet::Script::Reports;
 
 FixMyStreet::App->log->disable('info');
 END { FixMyStreet::App->log->enable('info'); }
+
+# Mock fetching bank holidays
+my $uk = Test::MockModule->new('FixMyStreet::Cobrand::UK');
+$uk->mock('_fetch_url', sub { '{}' });
 
 my $mech = FixMyStreet::TestMech->new;
 
@@ -24,17 +31,18 @@ sub create_contact {
     $contact->update;
 }
 
-create_contact({ category => 'Report missed collection', email => 'missed' });
-create_contact({ category => 'Request new container', email => 'request' },
+create_contact({ category => 'Report missed collection', email => 'missed@example.org' });
+create_contact({ category => 'Request new container', email => 'request@example.org' },
     { code => 'Quantity', required => 1, automated => 'hidden_field' },
     { code => 'Container_Type', required => 1, automated => 'hidden_field' },
 );
-create_contact({ category => 'General enquiry', email => 'general' },
+create_contact({ category => 'General enquiry', email => 'general@example.org' },
     { code => 'Notes', description => 'Notes', required => 1, datatype => 'text' });
 
 FixMyStreet::override_config {
     ALLOWED_COBRANDS => ['bromley', 'fixmystreet'],
     COBRAND_FEATURES => { echo => { bromley => { sample_data => 1 } }, hercules => { bromley => 1 } },
+    MAPIT_URL => 'http://mapit.uk/',
 }, sub {
     $mech->host('bromley.fixmystreet.com');
     subtest 'Missing address lookup' => sub {
@@ -44,6 +52,7 @@ FixMyStreet::override_config {
         $mech->content_contains('can’t find your address');
     };
     subtest 'Address lookup' => sub {
+        set_fixed_time('2020-05-28T17:00:00Z'); # After sample data collection
         $mech->get_ok('/hercules');
         $mech->submit_form_ok({ with_fields => { postcode => 'BR1 1AA' } });
         $mech->submit_form_ok({ with_fields => { address => '1000000002' } });
@@ -51,7 +60,15 @@ FixMyStreet::override_config {
         $mech->content_contains('Food waste collection');
     };
     subtest 'Report a missed bin' => sub {
+        $mech->content_contains('service-101', 'Can report, last collection was 27th');
+        $mech->content_contains('service-102', 'Can report, last collection was 27th');
+        $mech->content_lacks('service-535', 'Cannot report, last collection was 20th');
+        $mech->content_lacks('service-104', 'Cannot report, last collection was 18th');
         $mech->follow_link_ok({ text => 'Report a missed collection' });
+        $mech->content_contains('service-101', 'Checkbox, last collection was 27th');
+        $mech->content_contains('service-102', 'Checkbox, last collection was 27th');
+        $mech->content_lacks('service-535', 'No checkbox, last collection was 20th');
+        $mech->content_lacks('service-104', 'No checkbox, last collection was 18th');
         $mech->submit_form_ok({ form_number => 2 });
         $mech->content_contains('Please specify what was missed');
         $mech->submit_form_ok({ with_fields => { 'service-101' => 1 } });
@@ -66,7 +83,13 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ with_fields => { name => "Test McTest", email => $user->email } });
         $mech->content_contains($user->email);
         $mech->submit_form_ok({ with_fields => { process => 'summary' } });
-        $mech->content_contains('Your request has been sent');
+        $mech->content_contains('Your report has been sent');
+        FixMyStreet::Script::Reports::send();
+        my @emails = $mech->get_email;
+        is $emails[0]->header('To'), '"Bromley Council" <missed@example.org>';
+        is $emails[1]->header('To'), $user->email;
+        my $body = $mech->get_text_body_from_email($emails[1]);
+        like $body, qr/Your report to Bromley Council has been logged/;
     };
     subtest 'Check report visibility' => sub {
         my $report = FixMyStreet::DB->resultset("Problem")->first;
@@ -123,7 +146,7 @@ FixMyStreet::override_config {
         $mech->content_contains('Test McTest');
         $mech->content_contains($user->email);
         $mech->submit_form_ok({ with_fields => { process => 'summary' } });
-        $mech->content_contains('Your request has been sent');
+        $mech->content_contains('Your enquiry has been sent');
         my $report = FixMyStreet::DB->resultset("Problem")->search(undef, { order_by => { -desc => 'id' } })->first;
         is $report->get_extra_field_value('Notes'), 'Some notes';
         is $report->user->email, $user->email;

@@ -3,6 +3,8 @@
 * Unreleased
     - New features:
         - Add Open Location Codes support to search box. #3047
+    - Front end improvements:
+        - Add lazy image loading on list items.
     - Changes:
         - Mark user as active when sent an email alert.
     - Bugfixes:
@@ -13,6 +15,7 @@
         - Fix double encoding of per-category templates.
         - Return reports in all closed states through Open311.
         - Improve compatibility with G Suite OpenID Connect authentication. #3032
+        - Skip accounts without email when sending inactive emails.
     - Admin improvements:
         - Display user name/email for contributed as reports. #2990
         - Interface for enabling anonymous reports for certain categories. #2989

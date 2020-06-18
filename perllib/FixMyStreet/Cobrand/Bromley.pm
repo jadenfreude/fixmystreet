@@ -13,6 +13,7 @@ use Sort::Key::Natural qw(natkeysort_inplace);
 use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8);
 use FixMyStreet::DateRange;
+use FixMyStreet::WorkingDays;
 
 sub council_area_id { return 2482; }
 sub council_area { return 'Bromley'; }
@@ -374,6 +375,14 @@ sub munge_load_and_group_problems {
     }
 }
 
+# We want to send confirmation emails only for Waste reports
+sub report_sent_confirmation_email {
+    my ($self, $report) = @_;
+    my $contact = $report->contact or return;
+    return 'id' if grep { $_ eq 'Waste' } @{$report->contact->groups};
+    return '';
+}
+
 sub munge_around_category_where {
     my ($self, $where) = @_;
     $where->{extra} = [ undef, { -not_like => '%Waste%' } ];
@@ -453,6 +462,46 @@ sub bin_services_for_address {
     my $result = $echo->GetServiceUnitsForObject($uprn);
     return [] unless $result;
 
+    my %request_allowed = map { $_ => 1 } (535, 536, 537, 541, 542, 544);
+    my %service_name_override = (
+        531 => 'Non-Recyclable Waste',
+        532 => 'Non-Recyclable Waste',
+        533 => 'Non-Recyclable Waste',
+        535 => 'Mixed Recycling (Cans, Plastics & Glass)',
+        536 => 'Mixed Recycling (Cans, Plastics & Glass)',
+        537 => 'Paper & Cardboard',
+        541 => 'Paper & Cardboard',
+        542 => 'Food Waste',
+        544 => 'Food Waste',
+    );
+
+    $self->{c}->stash->{containers} = {
+        1 => 'Green Box (Plastic)',
+        2 => 'Wheeled Bin (Plastic)',
+        12 => 'Black Box (Paper)',
+        13 => 'Wheeled Bin (Paper)',
+        9 => 'Kitchen Caddy',
+        10 => 'Outside Food Waste Container',
+        45 => 'Wheeled Bin (Food)',
+    };
+
+    my %containers = (
+        535 => [ 1 ],
+        536 => [ 2 ],
+        537 => [ 12 ],
+        541 => [ 13 ],
+        542 => [ 9, 10 ],
+        544 => [ 45 ],
+    );
+    my %quantity_max = (
+        535 => 6,
+        536 => 4,
+        537 => 6,
+        541 => 4,
+        542 => 6,
+        544 => 4,
+    );
+
     my @out;
     my $today = DateTime->today->set_time_zone(FixMyStreet->local_time_zone)->strftime("%F");
     foreach (@{$result->{ServiceUnit}}) {
@@ -489,50 +538,11 @@ sub bin_services_for_address {
         $next_ordinal = ordinal($min_next->day) if $min_next;
         $last_ordinal = ordinal($max_last->day) if $max_last;
 
-        my %request_allowed = map { $_ => 1 } (535, 536, 537, 541, 542, 544);
-        my %service_name_override = (
-            531 => 'Non-Recyclable Waste',
-            532 => 'Non-Recyclable Waste',
-            533 => 'Non-Recyclable Waste',
-            535 => 'Mixed Recycling (Cans, Plastics & Glass)',
-            536 => 'Mixed Recycling (Cans, Plastics & Glass)',
-            537 => 'Paper & Cardboard',
-            541 => 'Paper & Cardboard',
-            542 => 'Food Waste',
-            544 => 'Food Waste',
-        );
-
-        $self->{c}->stash->{containers} = {
-            1 => 'Green Box (Plastic)',
-            2 => 'Wheeled Bin (Plastic)',
-            12 => 'Black Box (Paper)',
-            13 => 'Wheeled Bin (Paper)',
-            9 => 'Kitchen Caddy',
-            10 => 'Outside Food Waste Container',
-            45 => 'Wheeled Bin (Food)',
-        };
-
-        my %containers = (
-            535 => [ 1 ],
-            536 => [ 2 ],
-            537 => [ 12 ],
-            541 => [ 13 ],
-            542 => [ 9, 10 ],
-            544 => [ 45 ],
-        );
-        my %quantity_max = (
-            535 => 6,
-            536 => 4,
-            537 => 6,
-            541 => 4,
-            542 => 6,
-            544 => 4,
-        );
-
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
             service_name => $service_name_override{$_->{ServiceId}} || $_->{ServiceName},
+            report_allowed => report_allowed($max_last),
             request_allowed => $request_allowed{$_->{ServiceId}},
             request_containers => $containers{$_->{ServiceId}},
             request_max => $quantity_max{$_->{ServiceId}},
@@ -549,6 +559,25 @@ sub bin_services_for_address {
     }
 
     return \@out;
+}
+
+=over
+
+=item report_allowed
+
+Given a DateTime object, return true if today is less than or equal to two
+working days (excluding weekends and bank holidays) after that date.
+
+=back
+
+=cut
+
+sub report_allowed {
+    my $dt = shift;
+    my $wd = FixMyStreet::WorkingDays->new(public_holidays => FixMyStreet::Cobrand::UK::public_holidays());
+    $dt = $wd->add_days($dt, 2)->ymd;
+    my $today = DateTime->today->set_time_zone(FixMyStreet->local_time_zone)->ymd;
+    return $today le $dt;
 }
 
 1;

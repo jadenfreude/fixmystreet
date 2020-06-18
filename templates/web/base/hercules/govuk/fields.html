@@ -229,9 +229,9 @@
 [% END %]
 
 [% BLOCK select %]
-  	<label class="govuk-label" for="[% field.id %]">
-    	[% field.label %]
-  	</label>
+    <label class="govuk-label" for="[% field.id %]">
+        [% field.label %]
+    </label>
   [% IF field.get_tag('hint') %]
     <span id="[% field.id %]-hint" class="govuk-hint">
         [% field.get_tag('hint') %]

@@ -12,7 +12,7 @@
 <div class="hercules__collections">
   <h2 class="govuk-heading-l">Your collections</h2>
   <div class="govuk-grid-row">
-    <div class="govuk-grid-column-two-thirds">  
+    <div class="govuk-grid-column-two-thirds">
 
 [% FOR unit IN service_data %]
 
@@ -45,7 +45,7 @@
     </dd>
   </div>
 </dl>
-<p class="hercules-panel-toggle"><a data-toggle-visibility="#panel-[% unit.service_id %]" class="hercules-service-name-link" >[% unit.service_name %] services </a></p>
+<p class="hercules-panel-toggle hidden-nojs"><a data-toggle-visibility="#panel-[% unit.service_id %]" class="hercules-service-name-link">[% unit.service_name %] services</a></p>
 
 <div class="hercules-services-launch-panel hidden-js" id="panel-[% unit.service_id %]">
     [% INCLUDE hercules/services.html %]
