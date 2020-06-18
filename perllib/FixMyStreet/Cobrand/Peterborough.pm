@@ -50,6 +50,15 @@ around open311_extra_data => sub {
             $_->{value} .= "\n\nSkanska CSC ref: $ref->{value}" if $ref;
         }
     }
+    if ( $row->contact =~ /Bartec/ ) {
+        my $address = $row->geocode->{resourceSets}->[0]->{resources}->[0]->{address};
+        my ($number, $street) = $address->{addressLine} =~ /\s*(\d*)\s*(.*)/;
+        push @$open311_only, (
+            { name => 'postcode', value => $address->{postalCode} },
+            { name => 'house_no', value => $number },
+            { name => 'street', value => $street }
+        );
+    }
     return $open311_only;
 };
 
