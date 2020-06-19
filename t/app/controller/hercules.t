@@ -57,18 +57,21 @@ FixMyStreet::override_config {
         $mech->submit_form_ok({ with_fields => { postcode => 'BR1 1AA' } });
         $mech->submit_form_ok({ with_fields => { address => '1000000002' } });
         $mech->content_contains('2 Example Street');
-        $mech->content_contains('Food waste collection');
+        $mech->content_contains('Food Waste');
+    };
+    subtest 'Thing already requested' => sub {
+        $mech->content_contains('A food waste collection has been reported as missed');
     };
     subtest 'Report a missed bin' => sub {
         $mech->content_contains('service-101', 'Can report, last collection was 27th');
-        $mech->content_contains('service-102', 'Can report, last collection was 27th');
+        $mech->content_contains('service-537', 'Can report, last collection was 27th');
         $mech->content_lacks('service-535', 'Cannot report, last collection was 20th');
-        $mech->content_lacks('service-104', 'Cannot report, last collection was 18th');
+        $mech->content_lacks('service-542', 'Cannot report, last collection was 18th');
         $mech->follow_link_ok({ text => 'Report a missed collection' });
         $mech->content_contains('service-101', 'Checkbox, last collection was 27th');
-        $mech->content_contains('service-102', 'Checkbox, last collection was 27th');
+        $mech->content_contains('service-537', 'Checkbox, last collection was 27th');
         $mech->content_lacks('service-535', 'No checkbox, last collection was 20th');
-        $mech->content_lacks('service-104', 'No checkbox, last collection was 18th');
+        $mech->content_lacks('service-542', 'No checkbox, last collection was 18th');
         $mech->submit_form_ok({ form_number => 2 });
         $mech->content_contains('Please specify what was missed');
         $mech->submit_form_ok({ with_fields => { 'service-101' => 1 } });
@@ -132,6 +135,10 @@ FixMyStreet::override_config {
         is $report->get_extra_field_value('Quantity'), 2;
         is $report->get_extra_field_value('Container_Type'), 1;
     };
+    subtest 'Thing already requested' => sub {
+        $mech->get_ok('/hercules/uprn/1000000002');
+        $mech->content_contains('A new paper &amp; cardboard container request has been made');
+    };
     subtest 'General enquiry, bad data' => sub {
         $mech->get_ok('/hercules/uprn/1000000002/enquiry');
         is $mech->uri->path, '/hercules/uprn/1000000002';
@@ -148,13 +155,13 @@ FixMyStreet::override_config {
         my $i = 0;
         foreach (@events) {
             $i++ if /DTSTART;VALUE=DATE:20200701/ && /SUMMARY:Refuse collection/;
-            $i++ if /DTSTART;VALUE=DATE:20200708/ && /SUMMARY:Paper recycling collection/;
+            $i++ if /DTSTART;VALUE=DATE:20200708/ && /SUMMARY:Paper & Cardboard/;
         }
         is $i, 2, 'Two events from the sample data in the calendar';
     };
     subtest 'General enquiry, on behalf of someone else' => sub {
         $mech->log_in_ok($staff_user->email);
-        $mech->get_ok('/hercules/uprn/1000000002/enquiry?category=General+enquiry&service_id=102');
+        $mech->get_ok('/hercules/uprn/1000000002/enquiry?category=General+enquiry&service_id=537');
         $mech->submit_form_ok({ with_fields => { extra_Notes => 'Some notes' } });
         $mech->submit_form_ok({ with_fields => { name => "Test McTest", email => $user->email } });
         $mech->content_contains('Some notes');

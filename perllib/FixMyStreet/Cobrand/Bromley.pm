@@ -422,12 +422,7 @@ sub bin_addresses_for_postcode {
 
     my $echo = $self->feature('echo');
     $echo = Integrations::Echo->new(%$echo);
-    my $result = $echo->FindPoints($pc);
-    return [] unless $result;
-
-    my $points = $result->{PointInfo};
-    return [] unless $points;
-    $points = [ $points ] unless ref $points eq 'ARRAY';
+    my $points = $echo->FindPoints($pc);
     my $data = [ map { {
         value => $_->{SharedRef}{Value}{anyType},
         label => FixMyStreet::Template::title($_->{Description}),
@@ -453,6 +448,8 @@ sub look_up_property {
 
     my $result = $echo->GetPointAddress($uprn);
     return {
+        id => $result->{Id},
+        uprn => $uprn,
         address => $result->{Description},
         latitude => $result->{Coordinates}{GeoPoint}{Latitude},
         longitude => $result->{Coordinates}{GeoPoint}{Longitude},
@@ -478,14 +475,37 @@ sub construct_bin_date {
 
 sub bin_services_for_address {
     my $self = shift;
-    my $uprn = shift;
+    my $property = shift;
 
     my $echo = $self->feature('echo');
     $echo = Integrations::Echo->new(%$echo);
-    my $result = $echo->GetServiceUnitsForObject($uprn);
+    my $result = $echo->GetServiceUnitsForObject($property->{uprn});
     return [] unless $result;
 
-    my %request_allowed = map { $_ => 1 } (535, 536, 537, 541, 542, 544);
+    my $events = $echo->GetEventsForObject($property->{id});
+    my $open;
+    foreach (@$events) {
+        next if $_->{ResolvedDate} || $_->{ResolutionCodeId}; # XXX?
+        my $event_type = $_->{EventTypeId};
+        my $service_id = $_->{ServiceId};
+        if ($event_type == 2104) { # Request
+            my $data = $_->{Data}{ExtensibleDatum};
+            my $container;
+            foreach (@$data) {
+                if ($_->{ChildData}) {
+                    foreach (@{$_->{ChildData}{ExtensibleDatum}}) {
+                        $container = $_->{Value} if $_->{DatatypeName} eq 'Container Type';
+                    }
+                }
+            }
+            $open->{request}->{$container} = 1;
+        } elsif (2095 <= $event_type && $event_type <= 2103) { # Missed collection
+            $open->{missed}->{$service_id} = 1;
+        } else { # General enquiry of some sort
+            $open->{enquiry}->{$event_type} = 1;
+        }
+    }
+
     my %service_name_override = (
         531 => 'Non-Recyclable Waste',
         532 => 'Non-Recyclable Waste',
@@ -508,7 +528,7 @@ sub bin_services_for_address {
         45 => 'Wheeled Bin (Food)',
     };
 
-    my %containers = (
+    my %service_to_containers = (
         535 => [ 1 ],
         536 => [ 2 ],
         537 => [ 12 ],
@@ -516,6 +536,7 @@ sub bin_services_for_address {
         542 => [ 9, 10 ],
         544 => [ 45 ],
     );
+    my %request_allowed = map { $_ => 1 } keys %service_to_containers;
     my %quantity_max = (
         535 => 6,
         536 => 4,
@@ -561,14 +582,20 @@ sub bin_services_for_address {
         $next_ordinal = ordinal($min_next->day) if $min_next;
         $last_ordinal = ordinal($max_last->day) if $max_last;
 
+        my $containers = $service_to_containers{$_->{ServiceId}};
+        my $open_request = grep { $open->{request}->{$_} } @$containers;
+
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
             service_name => $service_name_override{$_->{ServiceId}} || $_->{ServiceName},
-            report_allowed => report_allowed($max_last),
+            report_allowed => report_allowed_time($max_last),
+            report_open => $open->{missed}->{$_->{ServiceId}},
             request_allowed => $request_allowed{$_->{ServiceId}},
-            request_containers => $containers{$_->{ServiceId}},
+            request_open => $open_request,
+            request_containers => $containers,
             request_max => $quantity_max{$_->{ServiceId}},
+            enquiry_open_events => $open->{enquiry},
             service_task_id => $servicetask->{Id},
             service_task_name => $servicetask->{TaskTypeName},
             service_task_type_id => $servicetask->{TaskTypeId},
@@ -600,10 +627,8 @@ sub bin_future_collections {
     my $echo = $self->feature('echo');
     $echo = Integrations::Echo->new(%$echo);
     my $result = $echo->GetServiceTaskInstances(@tasks);
-    return [] unless $result;
-
     my $events = [];
-    foreach (@{$result->{ServiceTaskInstances} || []}) {
+    foreach (@$result) {
         my $task_id = $_->{ServiceTaskRef}{Value}{anyType};
         foreach (@{$_->{Instances}{ScheduledTaskInfo}}) {
             my $dt = construct_bin_date($_->{CurrentScheduledDate});
@@ -617,7 +642,7 @@ sub bin_future_collections {
 
 =over
 
-=item report_allowed
+=item report_allowed_time
 
 Given a DateTime object, return true if today is less than or equal to two
 working days (excluding weekends and bank holidays) after that date.
@@ -626,7 +651,7 @@ working days (excluding weekends and bank holidays) after that date.
 
 =cut
 
-sub report_allowed {
+sub report_allowed_time {
     my $dt = shift;
     my $wd = FixMyStreet::WorkingDays->new(public_holidays => FixMyStreet::Cobrand::UK::public_holidays());
     $dt = $wd->add_days($dt, 2)->ymd;

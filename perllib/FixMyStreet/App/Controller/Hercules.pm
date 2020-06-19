@@ -84,7 +84,7 @@ sub uprn : Chained('/') : PathPart('hercules/uprn') : CaptureArgs(1) {
     $c->stash->{latitude} = $property->{latitude};
     $c->stash->{longitude} = $property->{longitude};
 
-    $c->stash->{service_data} = $c->cobrand->call_hook(bin_services_for_address => $uprn) || [];
+    $c->stash->{service_data} = $c->cobrand->call_hook(bin_services_for_address => $property) || [];
     $c->stash->{services} = { map { $_->{service_id} => $_ } @{$c->stash->{service_data}} };
 }
 
@@ -136,7 +136,7 @@ sub construct_bin_request_form {
     my $field_list = [];
 
     foreach (@{$c->stash->{service_data}}) {
-        next unless $_->{next};
+        next unless $_->{next} && !$_->{request_open};
         my $name = $_->{service_name};
         my $containers = $_->{request_containers};
         my $max = $_->{request_max};
@@ -237,7 +237,7 @@ sub construct_bin_report_form {
     my $field_list = [];
 
     foreach (@{$c->stash->{service_data}}) {
-        next unless $_->{last} && $_->{report_allowed};
+        next unless $_->{last} && $_->{report_allowed} && !$_->{report_open};
         my $id = $_->{service_id};
         my $name = $_->{service_name};
         push @$field_list, "service-$id" => {
