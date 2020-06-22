@@ -26,6 +26,7 @@
         - Add function to fetch user's country from Gaze.
     - Open311 improvements:
         - Use devolved data on update sending.
+        - Rewrite open311-update-reports to share code and improve functionality.
     - UK:
         - Add option for recaptcha. #3050
 
