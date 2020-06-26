@@ -5,7 +5,7 @@ use warnings;
 use DateTime;
 use Moo;
 use Tie::IxHash;
-use FixMyStreet; # TODO Pass in timezone/now?
+use FixMyStreet;
 
 has attr => ( is => 'ro', default => 'http://www.twistedfish.com/xmlns/echo/api/v1' );
 has action => ( is => 'lazy', default => sub { $_[0]->attr . "/Service/" } );
@@ -142,92 +142,93 @@ sub GetServiceUnitsForObject {
     my $self = shift;
     my $uprn = shift;
     my $obj = _uprn_ref($uprn);
-    return {
-        ServiceUnit => [ {
-            Id => 1001,
-            ServiceId => 101,
-            ServiceName => 'Refuse collection',
-            ServiceTasks => { ServiceTask => {
-                Id => 401,
-                ScheduleDescription => 'every Wednesday',
-                ServiceTaskSchedules => { ServiceTaskSchedule => {
-                    EndDate => { DateTime => '2050-01-01T00:00:00Z' },
-                    NextInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
-                        OriginalScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
-                    },
-                    LastInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-05-27T00:00:00Z' },
-                    },
-                } },
+    return [ {
+        Id => 1001,
+        ServiceId => 101,
+        ServiceName => 'Refuse collection',
+        ServiceTasks => { ServiceTask => {
+            Id => 401,
+            ScheduleDescription => 'every Wednesday',
+            ServiceTaskSchedules => { ServiceTaskSchedule => {
+                EndDate => { DateTime => '2050-01-01T00:00:00Z' },
+                NextInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
+                    OriginalScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
+                },
+                LastInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-05-27T00:00:00Z' },
+                },
             } },
-        }, {
-            Id => 1002,
-            ServiceId => 537,
-            ServiceName => 'Paper recycling collection',
-            ServiceTasks => { ServiceTask => {
-                Id => 402,
-                ScheduleDescription => 'every other Wednesday',
-                ServiceTaskSchedules => { ServiceTaskSchedule => {
-                    EndDate => { DateTime => '2050-01-01T00:00:00Z' },
-                    NextInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-06-10T00:00:00Z' },
-                        OriginalScheduledDate => { DateTime => '2020-06-10T00:00:00Z' },
-                    },
-                    LastInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-05-27T00:00:00Z' },
-                    },
-                } },
+        } },
+    }, {
+        Id => 1002,
+        ServiceId => 537,
+        ServiceName => 'Paper recycling collection',
+        ServiceTasks => { ServiceTask => {
+            Id => 402,
+            ScheduleDescription => 'every other Wednesday',
+            ServiceTaskSchedules => { ServiceTaskSchedule => {
+                EndDate => { DateTime => '2050-01-01T00:00:00Z' },
+                NextInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-06-10T00:00:00Z' },
+                    OriginalScheduledDate => { DateTime => '2020-06-10T00:00:00Z' },
+                },
+                LastInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-05-27T00:00:00Z' },
+                },
             } },
-        }, {
-            Id => 1003,
-            ServiceId => 535,
-            ServiceName => 'Domestic Container Mix Collection',
-            ServiceTasks => { ServiceTask => {
-                Id => 403,
-                ScheduleDescription => 'every other Wednesday',
-                ServiceTaskSchedules => { ServiceTaskSchedule => {
-                    EndDate => { DateTime => '2050-01-01T00:00:00Z' },
-                    NextInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
-                        OriginalScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
-                    },
-                    LastInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-05-20T00:00:00Z' },
-                    },
-                } },
+        } },
+    }, {
+        Id => 1003,
+        ServiceId => 535,
+        ServiceName => 'Domestic Container Mix Collection',
+        ServiceTasks => { ServiceTask => {
+            Id => 403,
+            ScheduleDescription => 'every other Wednesday',
+            ServiceTaskSchedules => { ServiceTaskSchedule => {
+                EndDate => { DateTime => '2050-01-01T00:00:00Z' },
+                NextInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
+                    OriginalScheduledDate => { DateTime => '2020-06-03T00:00:00Z' },
+                },
+                LastInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-05-20T00:00:00Z' },
+                },
             } },
-        }, {
-            Id => 1004,
-            ServiceId => 542,
-            ServiceName => 'Food waste collection',
-            ServiceTasks => { ServiceTask => {
-                Id => 404,
-                ScheduleDescription => 'every other Monday',
-                ServiceTaskSchedules => { ServiceTaskSchedule => [ {
-                    EndDate => { DateTime => '2020-01-01T00:00:00Z' },
-                    LastInstance => {
-                        CurrentScheduledDate => { DateTime => '2019-12-31T00:00:00Z' },
-                    },
-                }, {
-                    EndDate => { DateTime => '2050-01-01T00:00:00Z' },
-                    NextInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-06-02T00:00:00Z' },
-                        OriginalScheduledDate => { DateTime => '2020-06-01T00:00:00Z' },
-                    },
-                    LastInstance => {
-                        CurrentScheduledDate => { DateTime => '2020-05-18T00:00:00Z' },
-                    },
-                } ] },
-            } },
-        } ],
-    } if $self->sample_data;
-    $self->call('GetServiceUnitsForObject',
+        } },
+    }, {
+        Id => 1004,
+        ServiceId => 542,
+        ServiceName => 'Food waste collection',
+        ServiceTasks => { ServiceTask => {
+            Id => 404,
+            ScheduleDescription => 'every other Monday',
+            ServiceTaskSchedules => { ServiceTaskSchedule => [ {
+                EndDate => { DateTime => '2020-01-01T00:00:00Z' },
+                LastInstance => {
+                    CurrentScheduledDate => { DateTime => '2019-12-31T00:00:00Z' },
+                },
+            }, {
+                EndDate => { DateTime => '2050-01-01T00:00:00Z' },
+                NextInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-06-02T00:00:00Z' },
+                    OriginalScheduledDate => { DateTime => '2020-06-01T00:00:00Z' },
+                },
+                LastInstance => {
+                    CurrentScheduledDate => { DateTime => '2020-05-18T00:00:00Z' },
+                },
+            } ] },
+        } },
+    } ] if $self->sample_data;
+    # uncoverable statement
+    my $res = $self->call('GetServiceUnitsForObject',
         objectRef => $obj,
         query => {
             IncludeTaskInstances => 'true',
         }
     );
+    # uncoverable statement
+    return force_arrayref($res, 'ServiceUnit');
 }
 
 sub GetServiceTaskInstances {
@@ -270,6 +271,24 @@ sub GetServiceTaskInstances {
     return force_arrayref($res, 'ServiceTaskInstances');
 }
 
+sub GetEvent {
+    my ($self, $guid) = @_;
+    $self->call('GetEvent', ref => ixhash(
+        Key => 'Guid',
+        Type => 'Event',
+        Value => { 'msArray:anyType' => $guid },
+    ));
+}
+
+sub GetEventType {
+    my ($self, $id) = @_;
+    $self->call('GetEventType', ref => ixhash(
+        Key => 'Id',
+        Type => 'EventType',
+        Value => { 'msArray:anyType' => $id },
+    ));
+}
+
 sub GetEventsForObject {
     my ($self, $id, $type) = @_;
     my $from = DateTime->now->set_time_zone(FixMyStreet->local_time_zone)->subtract(months => 3);
@@ -284,14 +303,17 @@ sub GetEventsForObject {
         # Request for a new paper container
         EventTypeId => 2104,
         Data => { ExtensibleDatum => [
+            { Value => 2, DatatypeName => 'Source' },
             {
                 ChildData => { ExtensibleDatum => [
+                    { Value => 1, DatatypeName => 'Action' },
                     { Value => 12, DatatypeName => 'Container Type' },
                 ] },
             },
         ] },
         ServiceId => 535,
     } ] if $self->sample_data;
+    # uncoverable statement
     my $res = $self->call('GetEventsForObject',
         objectRef => ixhash(
             Key => 'Id',

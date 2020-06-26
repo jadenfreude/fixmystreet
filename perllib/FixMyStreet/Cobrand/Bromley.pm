@@ -14,6 +14,7 @@ use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8);
 use FixMyStreet::DateRange;
 use FixMyStreet::WorkingDays;
+use Open311::GetServiceRequestUpdates;
 use Memcached;
 
 sub council_area_id { return 2482; }
@@ -222,7 +223,7 @@ sub open311_config_updates {
     $params->{endpoints} = {
         service_request_updates => 'update.xml',
         update => 'update.xml'
-    };
+    } if $params->{endpoint} =~ /bromley.gov.uk/;
 }
 
 sub open311_pre_send {
@@ -477,35 +478,6 @@ sub bin_services_for_address {
     my $self = shift;
     my $property = shift;
 
-    my $echo = $self->feature('echo');
-    $echo = Integrations::Echo->new(%$echo);
-    my $result = $echo->GetServiceUnitsForObject($property->{uprn});
-    return [] unless $result;
-
-    my $events = $echo->GetEventsForObject($property->{id});
-    my $open;
-    foreach (@$events) {
-        next if $_->{ResolvedDate} || $_->{ResolutionCodeId}; # XXX?
-        my $event_type = $_->{EventTypeId};
-        my $service_id = $_->{ServiceId};
-        if ($event_type == 2104) { # Request
-            my $data = $_->{Data}{ExtensibleDatum};
-            my $container;
-            foreach (@$data) {
-                if ($_->{ChildData}) {
-                    foreach (@{$_->{ChildData}{ExtensibleDatum}}) {
-                        $container = $_->{Value} if $_->{DatatypeName} eq 'Container Type';
-                    }
-                }
-            }
-            $open->{request}->{$container} = 1;
-        } elsif (2095 <= $event_type && $event_type <= 2103) { # Missed collection
-            $open->{missed}->{$service_id} = 1;
-        } else { # General enquiry of some sort
-            $open->{enquiry}->{$event_type} = 1;
-        }
-    }
-
     my %service_name_override = (
         531 => 'Non-Recyclable Waste',
         532 => 'Non-Recyclable Waste',
@@ -546,50 +518,30 @@ sub bin_services_for_address {
         544 => 4,
     );
 
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+    my $result = $echo->GetServiceUnitsForObject($property->{uprn});
+    return [] unless @$result;
+
+    my $events = $echo->GetEventsForObject($property->{id});
+    my $open = _parse_open_events($events);
+
     my @out;
-    my $today = DateTime->now->set_time_zone(FixMyStreet->local_time_zone)->strftime("%F");
-    foreach (@{$result->{ServiceUnit}}) {
+    foreach (@$result) {
         next unless $_->{ServiceTasks};
 
         my $servicetask = $_->{ServiceTasks}{ServiceTask};
-        my $schedules = $servicetask->{ServiceTaskSchedules}{ServiceTaskSchedule};
-        $schedules = [ $schedules ] unless ref $schedules eq 'ARRAY';
+        my $schedules = _parse_schedules($servicetask);
 
-        my ($min_next, $max_last, $next_changed, $next_ordinal, $last_ordinal);
-        foreach my $schedule (@$schedules) {
-            my $end_date = construct_bin_date($schedule->{EndDate})->strftime("%F");
-            next if $end_date lt $today;
-
-            my $next = $schedule->{NextInstance}; # CurrentScheduledData->DateTime, Ref->Value->anyType, OriginalScheduledDate->DateTime
-            my $d = construct_bin_date($next->{CurrentScheduledDate});
-            if ($d && (!$min_next || $d < $min_next)) {
-                $min_next = $d;
-                $next_changed = $next->{CurrentScheduledDate}{DateTime} ne $next->{OriginalScheduledDate}{DateTime};
-            }
-
-            my $last = $schedule->{LastInstance}; # ditto
-            $d = construct_bin_date($last->{CurrentScheduledDate});
-            $max_last = $d if $d && (!$max_last || $d > $max_last);
-            # XXX Have to call getTask for each last instance to get its CompletedDate?
-
-            #$schedule->{ScheduleDescription};
-            #$schedule->{ScheduleId};
-            #$schedule->{Id};
-            #$schedule->{Allocation}; # Type RoundName RoundId RoundGroupName/Id RoundLegId RoundLegName
-        }
-
-        next unless $min_next or $max_last;
-        $next_ordinal = ordinal($min_next->day) if $min_next;
-        $last_ordinal = ordinal($max_last->day) if $max_last;
+        next unless $schedules->{next} or $schedules->{last};
 
         my $containers = $service_to_containers{$_->{ServiceId}};
         my $open_request = grep { $open->{request}->{$_} } @$containers;
-
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
             service_name => $service_name_override{$_->{ServiceId}} || $_->{ServiceName},
-            report_allowed => report_allowed_time($max_last),
+            report_allowed => within_working_days($schedules->{last}, 2),
             report_open => $open->{missed}->{$_->{ServiceId}},
             request_allowed => $request_allowed{$_->{ServiceId}},
             request_open => $open_request,
@@ -600,17 +552,88 @@ sub bin_services_for_address {
             service_task_name => $servicetask->{TaskTypeName},
             service_task_type_id => $servicetask->{TaskTypeId},
             schedule => $servicetask->{ScheduleDescription},
-            last => $max_last,
-            last_ordinal => $last_ordinal,
-            next => $min_next,
-            next_ordinal => $next_ordinal,
-            next_changed => $next_changed,
+            last => $schedules->{last},
+            last_ordinal => $schedules->{last_ordinal},
+            next => $schedules->{next},
+            next_ordinal => $schedules->{next_ordinal},
+            next_changed => $schedules->{next_changed},
         };
-
         push @out, $row;
     }
 
     return \@out;
+}
+
+sub _parse_open_events {
+    my $events = shift;
+    my $open;
+    foreach (@$events) {
+        next if $_->{ResolvedDate} || $_->{ResolutionCodeId}; # Is this the right field?
+        my $event_type = $_->{EventTypeId};
+        my $service_id = $_->{ServiceId};
+        if ($event_type == 2104) { # Request
+            my $data = $_->{Data}{ExtensibleDatum};
+            my $container;
+            DATA: foreach (@$data) {
+                if ($_->{ChildData}) {
+                    foreach (@{$_->{ChildData}{ExtensibleDatum}}) {
+                        if ($_->{DatatypeName} eq 'Container Type') {
+                            $container = $_->{Value};
+                            last DATA;
+                        }
+                    }
+                }
+            }
+            $open->{request}->{$container} = 1;
+        } elsif (2095 <= $event_type && $event_type <= 2103) { # Missed collection
+            $open->{missed}->{$service_id} = 1;
+        } else { # General enquiry of some sort
+            $open->{enquiry}->{$event_type} = 1;
+        }
+    }
+    return $open;
+}
+
+sub _parse_schedules {
+    my $servicetask = shift;
+    my $schedules = $servicetask->{ServiceTaskSchedules}{ServiceTaskSchedule};
+    $schedules = [ $schedules ] unless ref $schedules eq 'ARRAY';
+
+    my $today = DateTime->now->set_time_zone(FixMyStreet->local_time_zone)->strftime("%F");
+    my ($min_next, $max_last, $next_changed);
+    foreach my $schedule (@$schedules) {
+        my $end_date = construct_bin_date($schedule->{EndDate})->strftime("%F");
+        next if $end_date lt $today;
+
+        my $next = $schedule->{NextInstance};
+        my $d = construct_bin_date($next->{CurrentScheduledDate});
+        if ($d && (!$min_next || $d < $min_next)) {
+            $min_next = $d;
+            $next_changed = $next->{CurrentScheduledDate}{DateTime} ne $next->{OriginalScheduledDate}{DateTime};
+        }
+
+        my $last = $schedule->{LastInstance};
+        $d = construct_bin_date($last->{CurrentScheduledDate});
+        $max_last = $d if $d && (!$max_last || $d > $max_last);
+        # XXX Have to call getTask for each last instance to get its CompletedDate?
+
+        #$schedule->{ScheduleDescription};
+        #$schedule->{ScheduleId};
+        #$schedule->{Id};
+        #$schedule->{Allocation}; # Type RoundName RoundId RoundGroupName/Id RoundLegId RoundLegName
+    }
+
+    my ($next_ordinal, $last_ordinal);
+    $next_ordinal = ordinal($min_next->day) if $min_next;
+    $last_ordinal = ordinal($max_last->day) if $max_last;
+
+    return {
+        next => $min_next,
+        next_ordinal => $next_ordinal,
+        next_changed => $next_changed,
+        last => $max_last,
+        last_ordinal => $last_ordinal,
+    };
 }
 
 sub bin_future_collections {
@@ -630,7 +653,8 @@ sub bin_future_collections {
     my $events = [];
     foreach (@$result) {
         my $task_id = $_->{ServiceTaskRef}{Value}{anyType};
-        foreach (@{$_->{Instances}{ScheduledTaskInfo}}) {
+        my $tasks = Integrations::Echo::force_arrayref($_->{Instances}, 'ScheduledTaskInfo');
+        foreach (@$tasks) {
             my $dt = construct_bin_date($_->{CurrentScheduledDate});
             my $summary = $names{$task_id} . ' collection';
             my $desc = '';
@@ -642,21 +666,167 @@ sub bin_future_collections {
 
 =over
 
-=item report_allowed_time
+=item within_working_days
 
-Given a DateTime object, return true if today is less than or equal to two
-working days (excluding weekends and bank holidays) after that date.
+Given a DateTime object and a number, return true if today is less than or
+equal to that number of working days (excluding weekends and bank holidays)
+after the date.
+
+=cut
+
+sub within_working_days {
+    my ($dt, $days) = @_;
+    my $wd = FixMyStreet::WorkingDays->new(public_holidays => FixMyStreet::Cobrand::UK::public_holidays());
+    $dt = $wd->add_days($dt, $days)->ymd;
+    my $today = DateTime->now->set_time_zone(FixMyStreet->local_time_zone)->ymd;
+    return $today le $dt;
+}
+
+=item waste_fetch_events
+
+Loop through all open waste events to see if there have been any updates
 
 =back
 
 =cut
 
-sub report_allowed_time {
-    my $dt = shift;
-    my $wd = FixMyStreet::WorkingDays->new(public_holidays => FixMyStreet::Cobrand::UK::public_holidays());
-    $dt = $wd->add_days($dt, 2)->ymd;
-    my $today = DateTime->now->set_time_zone(FixMyStreet->local_time_zone)->ymd;
-    return $today le $dt;
+sub waste_fetch_events {
+    my ($self, $verbose) = @_;
+
+    my $body = $self->body;
+    my @contacts = $body->contacts->search({
+        send_method => 'Open311',
+        endpoint => { '!=', '' },
+    })->all;
+    die "Could not find any devolved contacts\n" unless @contacts;
+
+    my %open311_conf = (
+        endpoint => $contacts[0]->endpoint || '',
+        api_key => $contacts[0]->api_key || '',
+        jurisdiction => $contacts[0]->jurisdiction || '',
+        extended_statuses => $body->send_extended_statuses,
+    );
+    my $cobrand = $body->get_cobrand_handler;
+    $cobrand->call_hook(open311_config_updates => \%open311_conf)
+        if $cobrand;
+    my $open311 = Open311->new(%open311_conf);
+
+    my $updates = Open311::GetServiceRequestUpdates->new(
+        current_open311 => $open311,
+        current_body => $body,
+        system_user => $body->comment_user,
+        # XXX Is 1 by default for Bromley, will need to be 0 if we want to send emails
+        suppress_alerts => $body->suppress_alerts,
+        blank_updates_permitted => $body->blank_updates_permitted,
+    );
+
+    my $echo = $self->feature('echo');
+    $echo = Integrations::Echo->new(%$echo);
+
+    my $cfg = {
+        verbose => $verbose,
+        updates => $updates,
+        echo => $echo,
+        event_types => {},
+    };
+
+    my $reports = $self->problems->search({
+        external_id => { '!=', '' },
+        state => [ FixMyStreet::DB::Result::Problem->open_states() ],
+        category => [ map { $_->category } @contacts ],
+    });
+
+    while (my $report = $reports->next) {
+        print 'Fetching data for report ' . $report->id . "\n" if $verbose;
+
+        my $event = $cfg->{echo}->GetEvent($report->external_id);
+        my $request = $self->construct_waste_open311_update($cfg, $event) or next;
+
+        return if !$request->{status} || $request->{status} eq 'confirmed'; # Still in initial state
+        return unless $self->waste_check_last_update(
+            $cfg, $report, $request->{status}, $request->{external_status_code});
+
+        my $last_updated = construct_bin_date($event->{LastUpdatedDate});
+        $request->{comment_time} = $last_updated;
+
+        print "  Updating report to state $request->{status}, $request->{description} ($request->{external_status_code})\n" if $cfg->{verbose};
+        $cfg->{updates}->process_update($request, $report);
+    }
+}
+
+sub construct_waste_open311_update {
+    my ($self, $cfg, $event) = @_;
+
+    my $event_type = $cfg->{event_types}{$event->{EventTypeId}} ||= $self->waste_get_event_type($cfg, $event->{EventTypeId});
+    my $state_id = $event->{EventStateId};
+    my $resolution_id = $event->{ResolutionCodeId} || '';
+    my $status = $event_type->{states}{$state_id}{state};
+    my $description = $event_type->{resolution}{$resolution_id} || $event_type->{states}{$state_id}{name};
+    return {
+        description => $description,
+        status => $status,
+        update_id => 'waste',
+        external_status_code => $resolution_id,
+    };
+}
+
+sub waste_get_event_type {
+    my ($self, $cfg, $id) = @_;
+
+    my $event_type = $cfg->{echo}->GetEventType($id);
+
+    my $state_map = {
+        New => { New => 'confirmed' },
+        Pending => {
+            Unallocated => 'investigating',
+            'Allocated to Crew' => 'action scheduled',
+        },
+        Closed => {
+            Completed => 'fixed - council',
+            'Not Completed' => 'unable to fix',
+            Rejected => 'closed',
+        },
+    };
+
+    my $states = $event_type->{Workflow}->{States}->{State};
+    my $data;
+    foreach (@$states) {
+        my $core = $_->{CoreState}; # New/Pending/Closed
+        my $name = $_->{Name}; # New : Unallocated/Allocated to Crew : Completed/Not Completed/Rejected
+        $data->{states}{$_->{Id}} = {
+            core => $core,
+            name => $name,
+            state => $state_map->{$core}{$name},
+        };
+        my $codes = Integrations::Echo::force_arrayref($_->{ResolutionCodes}, 'StateResolutionCode');
+        foreach (@$codes) {
+            my $name = $_->{Name};
+            my $id = $_->{ResolutionCodeId};
+            $data->{resolution}{$id} = $name;
+        }
+    }
+    return $data;
+}
+
+# We only have the report's current state, no history, so must check current
+# against latest received update to see if state the same, and skip if so
+sub waste_check_last_update {
+    my ($self, $cfg, $report, $status, $resolution_id) = @_;
+
+    my $latest = $report->comments->search(
+        { external_id => 'waste', },
+        { order_by => { -desc => 'id' } }
+    )->first;
+
+    if ($latest) {
+        my $state = $cfg->{updates}->current_open311->map_state($status);
+        my $code = $latest->get_extra_metadata('external_status_code') || '';
+        if ($latest->problem_state eq $state && $code eq $resolution_id) {
+            print "  Latest update matches fetched state, skipping\n" if $cfg->{verbose};
+            return;
+        }
+    }
+    return 1;
 }
 
 1;
