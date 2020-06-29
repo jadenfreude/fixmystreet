@@ -460,9 +460,8 @@ sub construct_bin_date {
     return unless $str;
     my $offset = ($str->{OffsetMinutes} || 0) * 60;
     my $zone = DateTime::TimeZone->offset_as_string($offset);
-    $zone =~ s/(\d\d)$/:$1/;
-    (my $date = $str->{DateTime}) =~ s/Z/$zone/;
-    $date = DateTime::Format::W3CDTF->parse_datetime($date);
+    my $date = DateTime::Format::W3CDTF->parse_datetime($str->{DateTime});
+    $date->set_time_zone($zone);
     return $date;
 }
 
