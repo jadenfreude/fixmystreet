@@ -580,9 +580,11 @@ sub _parse_open_events {
                     }
                 }
             }
-            $open->{request}->{$container} = 1;
+            my $report = $self->problems->search({ external_id => $_->{Guid} })->first;
+            $open->{request}->{$container} = $report ? { report => $report } : 1;
         } elsif (2095 <= $event_type && $event_type <= 2103) { # Missed collection
-            $open->{missed}->{$service_id} = 1;
+            my $report = $self->problems->search({ external_id => $_->{Guid} })->first;
+            $open->{missed}->{$service_id} = $report ? { report => $report } : 1;
         } else { # General enquiry of some sort
             $open->{enquiry}->{$event_type} = 1;
         }
