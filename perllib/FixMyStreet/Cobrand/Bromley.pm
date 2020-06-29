@@ -524,7 +524,7 @@ sub bin_services_for_address {
     return [] unless @$result;
 
     my $events = $echo->GetEventsForObject($property->{id});
-    my $open = _parse_open_events($events);
+    my $open = $self->_parse_open_events($events);
 
     my @out;
     foreach (@$result) {
@@ -565,6 +565,7 @@ sub bin_services_for_address {
 }
 
 sub _parse_open_events {
+    my $self = shift;
     my $events = shift;
     my $open;
     foreach (@$events) {
@@ -584,9 +585,11 @@ sub _parse_open_events {
                     }
                 }
             }
-            $open->{request}->{$container} = 1;
+            my $report = $self->problems->search({ external_id => $_->{Guid} })->first;
+            $open->{request}->{$container} = $report ? { report => $report } : 1;
         } elsif (2095 <= $event_type && $event_type <= 2103) { # Missed collection
-            $open->{missed}->{$service_id} = 1;
+            my $report = $self->problems->search({ external_id => $_->{Guid} })->first;
+            $open->{missed}->{$service_id} = $report ? { report => $report } : 1;
         } else { # General enquiry of some sort
             $open->{enquiry}->{$event_type} = 1;
         }
