@@ -435,10 +435,10 @@ body.mappage {
   }
 }
 
-@import "../sass/hercules";
+@import "../sass/waste";
 
-// Hercules style overrides
-.hercules {
+// Waste style overrides
+.waste {
   [class^="govuk-heading-"],
   .govuk-fieldset__heading {
     font-family: $heading-font;

@@ -398,7 +398,7 @@ sub munge_reports_category_list {
 sub munge_report_new_contacts {
     my ($self, $categories) = @_;
 
-    return if $self->{c}->action =~ /^hercules/;
+    return if $self->{c}->action =~ /^waste/;
 
     @$categories = grep { grep { $_ ne 'Waste' } @{$_->groups} } @$categories;
     $self->SUPER::munge_report_new_contacts($categories);
@@ -650,6 +650,7 @@ sub bin_future_collections {
     my $echo = $self->feature('echo');
     $echo = Integrations::Echo->new(%$echo);
     my $result = $echo->GetServiceTaskInstances(@tasks);
+
     my $events = [];
     foreach (@$result) {
         my $task_id = $_->{ServiceTaskRef}{Value}{anyType};

@@ -266,10 +266,10 @@ subtest 'test open enquiries' => sub {
         ALLOWED_COBRANDS => 'bromley',
         COBRAND_FEATURES => {
             echo => { bromley => { sample_data => 1 } },
-            hercules => { bromley => 1 }
+            waste => { bromley => 1 }
         },
     }, sub {
-        $mech->get_ok('/hercules/uprn/12345');
+        $mech->get_ok('/waste/uprn/12345');
         $mech->follow_link_ok({ text => 'Report a problem with a food waste collection' });
         $mech->content_contains('Waste spillage');
         $mech->content_lacks('Gate not closed');
@@ -282,14 +282,14 @@ subtest 'test waste max-per-day' => sub {
         ALLOWED_COBRANDS => 'bromley',
         COBRAND_FEATURES => {
             echo => { bromley => { max_per_day => 1, sample_data => 1 } },
-            hercules => { bromley => 1 }
+            waste => { bromley => 1 }
         },
     }, sub {
         SKIP: {
             skip( "No memcached", 2 ) unless Memcached::increment('bromley-test');
             Memcached::delete("bromley-test");
-            $mech->get_ok('/hercules/uprn/12345');
-            $mech->get('/hercules/uprn/12345');
+            $mech->get_ok('/waste/uprn/12345');
+            $mech->get('/waste/uprn/12345');
             is $mech->res->code, 403, 'Now forbidden';
         }
     };
@@ -350,7 +350,7 @@ subtest 'updating of waste reports' => sub {
         ALLOWED_COBRANDS => 'bromley',
         COBRAND_FEATURES => {
             echo => { bromley => { url => 'https://www.example.org/' } },
-            hercules => { bromley => 1 }
+            waste => { bromley => 1 }
         },
     }, sub {
         ($report) = $mech->create_problems_for_body(1, $body->id, 'Report missed collection', {
@@ -413,7 +413,7 @@ subtest 'updating of waste reports' => sub {
                 receive_username => 'un',
                 receive_password => 'password',
             } },
-            hercules => { bromley => 1 }
+            waste => { bromley => 1 }
         },
     }, sub {
         FixMyStreet::App->log->disable('info');
