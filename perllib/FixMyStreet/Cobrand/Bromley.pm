@@ -536,7 +536,7 @@ sub bin_services_for_address {
         next unless $schedules->{next} or $schedules->{last};
 
         my $containers = $service_to_containers{$_->{ServiceId}};
-        my ($open_request) = grep { $open->{request}->{$_} } @$containers;
+        my ($open_request) = grep { $_ } map { $open->{request}->{$_} } @$containers;
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
