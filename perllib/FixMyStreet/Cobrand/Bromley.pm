@@ -7,8 +7,6 @@ use utf8;
 use DateTime::Format::W3CDTF;
 use DateTime::Format::Flexible;
 use Integrations::Echo;
-use LWP::Simple qw(get);
-use JSON::MaybeXS;
 use Sort::Key::Natural qw(natkeysort_inplace);
 use Try::Tiny;
 use URI::Escape qw(uri_escape_utf8);
@@ -468,9 +466,8 @@ sub construct_bin_date {
     return unless $str;
     my $offset = ($str->{OffsetMinutes} || 0) * 60;
     my $zone = DateTime::TimeZone->offset_as_string($offset);
-    $zone =~ s/(\d\d)$/:$1/;
-    (my $date = $str->{DateTime}) =~ s/Z/$zone/;
-    $date = DateTime::Format::W3CDTF->parse_datetime($date);
+    my $date = DateTime::Format::W3CDTF->parse_datetime($str->{DateTime});
+    $date->set_time_zone($zone);
     return $date;
 }
 
@@ -499,7 +496,6 @@ sub bin_services_for_address {
         10 => 'Outside Food Waste Container',
         45 => 'Wheeled Bin (Food)',
     };
-
     my %service_to_containers = (
         535 => [ 1 ],
         536 => [ 2 ],

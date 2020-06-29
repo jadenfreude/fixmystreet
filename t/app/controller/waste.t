@@ -190,11 +190,11 @@ FixMyStreet::override_config {
         my $integ = Test::MockModule->new('SOAP::Lite');
         $integ->mock(call => sub {
             return SOAP::Result->new(result => {
-				PointInfo => [
-					{ Description => '1 Example Street', SharedRef => { Value => { anyType => 1000000001 } } },
-					{ Description => '2 Example Street', SharedRef => { Value => { anyType => 1000000002 } } },
-				],
-			});
+                PointInfo => [
+                    { Description => '1 Example Street', SharedRef => { Value => { anyType => 1000000001 } } },
+                    { Description => '2 Example Street', SharedRef => { Value => { anyType => 1000000002 } } },
+                ],
+            });
         });
 
         $mech->get_ok('/waste');
