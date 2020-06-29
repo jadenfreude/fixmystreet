@@ -247,8 +247,10 @@ sub construct_bin_report_form {
         };
     }
 
-    push @$field_list, category => { type => 'Hidden', default => 'Report missed collection' };
-    push @$field_list, submit => { type => 'Submit', value => 'Report collection as missed', element_attr => { class => 'govuk-button' } };
+    if (@$field_list) {
+        push @$field_list, category => { type => 'Hidden', default => 'Report missed collection' };
+        push @$field_list, submit => { type => 'Submit', value => 'Report collection as missed', element_attr => { class => 'govuk-button' } };
+    }
 
     return $field_list;
 }

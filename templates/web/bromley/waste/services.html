@@ -1,6 +1,7 @@
 [% IF unit.report_open %]
   <span class="waste-service-descriptor">A [% unit.service_name FILTER lower %] collection has been reported as missed</span>
 [% ELSIF unit.report_allowed %]
+  [% any_report_allowed = 1 %]
   <form method="post" action="[% c.uri_for_action('waste/report', [ uprn ]) %]" class="waste-service-launch-arrow">
     <input type="hidden" name="token" value="[% csrf_token %]">
     <input type="hidden" name="service-[% unit.service_id %]" value="1">
@@ -14,6 +15,7 @@
 [% IF unit.request_open %]
   <span class="waste-service-descriptor">A new [% unit.service_name FILTER lower %] container request has been made</span>
 [% ELSIF unit.request_allowed %]
+  [% any_request_allowed = 1 %]
   <form method="post" action="[% c.uri_for_action('waste/request', [ uprn ]) %]" class="waste-service-launch-arrow">
     <input type="hidden" name="token" value="[% csrf_token %]">
     <input type="hidden" name="container-[% unit.request_containers.0 %]" value="1">
