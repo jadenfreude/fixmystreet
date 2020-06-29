@@ -531,7 +531,7 @@ sub bin_services_for_address {
         next unless $schedules->{next} or $schedules->{last};
 
         my $containers = $service_to_containers{$_->{ServiceId}};
-        my $open_request = grep { $open->{request}->{$_} } @$containers;
+        my ($open_request) = grep { $_ } map { $open->{request}->{$_} } @$containers;
         my $row = {
             id => $_->{Id},
             service_id => $_->{ServiceId},
@@ -580,9 +580,11 @@ sub _parse_open_events {
                     }
                 }
             }
-            $open->{request}->{$container} = 1;
+            my $report = $self->problems->search({ external_id => $_->{Guid} })->first;
+            $open->{request}->{$container} = $report ? { report => $report } : 1;
         } elsif (2095 <= $event_type && $event_type <= 2103) { # Missed collection
-            $open->{missed}->{$service_id} = 1;
+            my $report = $self->problems->search({ external_id => $_->{Guid} })->first;
+            $open->{missed}->{$service_id} = $report ? { report => $report } : 1;
         } else { # General enquiry of some sort
             $open->{enquiry}->{$event_type} = 1;
         }
