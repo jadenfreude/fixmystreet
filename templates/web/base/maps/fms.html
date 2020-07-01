@@ -1,5 +1,9 @@
 [% map_toggle_link = BLOCK %]
-    <a class="hidden-nojs" id="map_layer_toggle" href="">[% loc('Aerial') %]</a>
+    [% IF c.req.params.aerial %]
+        <a class="" id="map_layer_toggle" href="[% c.uri_with( { aerial => 0 } ) %]">[% loc('Roads') %]</a>
+    [% ELSE %]
+        <a class="" id="map_layer_toggle" href="[% c.uri_with( { aerial => 1 } ) %]">[% loc('Aerial') %]</a>
+    [% END %]
 [% END %]
 [%
 map_html = INCLUDE maps/openlayers.html include_key = 1

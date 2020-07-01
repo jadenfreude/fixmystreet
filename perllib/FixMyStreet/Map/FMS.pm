@@ -22,6 +22,14 @@ sub map_tile_base {
     '-', "//%stilma.mysociety.org/oml/%d/%d/%d.png";
 }
 
+sub display_map {
+    my ($self, $c, %params) = @_;
+
+    $params{aerial} = $c->get_param("aerial") ? 1 : 0;
+
+    $self->SUPER::display_map($c, %params);
+}
+
 sub map_tiles {
     my ( $self, %params ) = @_;
     my ( $x, $y, $z ) = ( $params{x_tile}, $params{y_tile}, $params{zoom_act} );
@@ -38,11 +46,12 @@ sub map_tiles {
         my $key = FixMyStreet->config('BING_MAPS_API_KEY');
         my $url = "g=6570";
         $url .= "&productSet=mmOS&key=$key" if $z > 11 && !$ni;
+        my $layer = $params{aerial} ? "a" : "r";
         return [
-            "//ecn.t0.tiles.virtualearth.net/tiles/r" . $self->get_quadkey($x-1, $y-1, $z) . ".png?$url",
-            "//ecn.t1.tiles.virtualearth.net/tiles/r" . $self->get_quadkey($x,   $y-1, $z) . ".png?$url",
-            "//ecn.t2.tiles.virtualearth.net/tiles/r" . $self->get_quadkey($x-1, $y,   $z) . ".png?$url",
-            "//ecn.t3.tiles.virtualearth.net/tiles/r" . $self->get_quadkey($x,   $y,   $z) . ".png?$url",
+            "//ecn.t0.tiles.virtualearth.net/tiles/$layer" . $self->get_quadkey($x-1, $y-1, $z) . ".png?$url",
+            "//ecn.t1.tiles.virtualearth.net/tiles/$layer" . $self->get_quadkey($x,   $y-1, $z) . ".png?$url",
+            "//ecn.t2.tiles.virtualearth.net/tiles/$layer" . $self->get_quadkey($x-1, $y,   $z) . ".png?$url",
+            "//ecn.t3.tiles.virtualearth.net/tiles/$layer" . $self->get_quadkey($x,   $y,   $z) . ".png?$url",
         ];
     }
 }
