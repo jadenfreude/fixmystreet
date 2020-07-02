@@ -501,28 +501,34 @@ sub receive_echo_event_notification : Path('/waste/echo') : Args(0) {
     $c->stash->{format} = 'xml';
     $c->response->header(Content_Type => 'text/xml');
 
-    $c->detach('soap_error', [ 'POST' ]) unless $c->req->method eq 'POST';
+    require SOAP::Lite;
+
+    $c->detach('soap_error', [ 'Invalid method', 405 ]) unless $c->req->method eq 'POST';
 
     my $echo = $c->cobrand->feature('echo');
-    $c->detach('soap_error', [ 'config', 500 ]) unless $echo;
+    $c->detach('soap_error', [ 'Missing config', 500 ]) unless $echo;
 
     # Make sure we log entire request for debugging
-    $c->detach('soap_error', [ 'body' ]) unless $c->req->body;
+    $c->detach('soap_error', [ 'Missing body' ]) unless $c->req->body;
     my $soap = join('', $c->req->body->getlines);
     $c->log->info($soap);
 
     my $action = $c->req->header('SOAPAction');
-    $c->detach('soap_error', [ 'Action' ]) unless $action eq $echo->{receive_action};
+    $c->log->info('SOAPAction ' . ($action || '-'));
+    $c->detach('soap_error', [ 'Incorrect Action' ]) unless $action && $action eq $echo->{receive_action};
 
     my $body = $c->cobrand->body;
-    $c->detach('soap_error', ['jurisdiction_id']) unless $body;
-
-    require SOAP::Lite;
+    $c->detach('soap_error', [ 'Bad jurisdiction' ]) unless $body;
 
     my $env = SOAP::Deserializer->deserialize($soap);
 
-    my $token = $env->header->{Security}{UsernameToken};
-    $c->detach('soap_error', ['api_key']) unless $token && $token->{Username} eq $echo->{receive_username} && $token->{Password} eq $echo->{receive_password};
+    my $header = $env->header;
+    $c->detach('soap_error', [ 'Missing SOAP header' ]) unless $header;
+    $header = $header->{Security};
+    $c->detach('soap_error', [ 'Missing Security header' ]) unless $header;
+    my $token = $header->{UsernameToken};
+    $c->detach('soap_error', [ 'Authentication failed' ])
+        unless $token && $token->{Username} eq $echo->{receive_username} && $token->{Password} eq $echo->{receive_password};
 
     my $event = $env->result;
 
@@ -540,7 +546,7 @@ sub soap_error : Private {
     my ($self, $c, $comment, $code) = @_;
     $code ||= 400;
     $c->response->status($code);
-    my $type = $code == 500 ? 'Client' : 'Server';
+    my $type = $code == 500 ? 'Server' : 'Client';
     $c->response->body(SOAP::Serializer->fault($type, "Bad request: $comment"));
 }
 

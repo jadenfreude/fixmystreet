@@ -419,7 +419,7 @@ subtest 'updating of waste reports' => sub {
         FixMyStreet::App->log->disable('info');
 
         $mech->get('/waste/echo');
-        is $mech->res->code, 400, 'Cannot GET';
+        is $mech->res->code, 405, 'Cannot GET';
 
         $mech->post('/waste/echo', Content_Type => 'text/xml');
         is $mech->res->code, 400, 'No body';
