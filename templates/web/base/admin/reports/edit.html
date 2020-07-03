@@ -135,12 +135,10 @@ class="admin-offsite-link">[% problem.latitude %], [% problem.longitude %]</a>
     [%~ IF extra_fields.size ~%]
         <ul>
         [%~ FOREACH field IN extra_fields ~%]
-            <li><strong>[%~ field.name ~%]</strong>: [% IF field.name == loc("Created By") ~%]
-                    [%# We can't use the .list.join() approach here because field.val
-                        is a FixMyStreet::Template::SafeString %]
-                    [%~ field.val ~%]
-                [%~ ELSE ~%]
+            <li><strong>[%~ field.name ~%]</strong>: [% IF field.val.0.defined ~%]
                     [%~ field.val.list.join(", ") ~%]
+                [%~ ELSE ~%]
+                    [%~ field.val ~%]
                 [%~ END ~%]
             </li>
         [%~ END ~%]
